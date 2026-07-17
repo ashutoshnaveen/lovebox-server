@@ -1,4 +1,4 @@
-import sharp from "sharp";
+import { Jimp } from "jimp";
 import { validateSenderPasscode } from "../lib/auth";
 import {
   generateId,
@@ -44,13 +44,10 @@ export default async (request: Request): Promise<Response> => {
     }
 
     const imageBuffer = Buffer.from(await imageFile.arrayBuffer());
-    const resized = await sharp(imageBuffer)
-      .resize(DISPLAY_WIDTH, DISPLAY_HEIGHT, { fit: "cover", position: "center" })
-      .removeAlpha()
-      .raw()
-      .toBuffer();
+    const image = await Jimp.read(imageBuffer);
+    await image.cover({ w: DISPLAY_WIDTH, h: DISPLAY_HEIGHT });
 
-    const rgb565 = convertToRgb565(resized);
+    const rgb565 = convertToRgb565(image.bitmap);
     const imageId = generateId();
 
     const message: LoveboxMessage = {
@@ -72,14 +69,14 @@ export default async (request: Request): Promise<Response> => {
   }
 };
 
-function convertToRgb565(rgbBuffer: Buffer): Buffer {
-  const pixelCount = DISPLAY_WIDTH * DISPLAY_HEIGHT;
+function convertToRgb565(bitmap: { width: number; height: number; data: Buffer }): Buffer {
+  const pixelCount = bitmap.width * bitmap.height;
   const rgb565 = Buffer.alloc(pixelCount * 2);
 
   for (let i = 0; i < pixelCount; i++) {
-    const r = rgbBuffer[i * 3];
-    const g = rgbBuffer[i * 3 + 1];
-    const b = rgbBuffer[i * 3 + 2];
+    const r = bitmap.data[i * 4];
+    const g = bitmap.data[i * 4 + 1];
+    const b = bitmap.data[i * 4 + 2];
     const color = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
     rgb565.writeUInt16LE(color, i * 2);
   }

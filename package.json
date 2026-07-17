@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@netlify/blobs": "^8.1.0",
-    "sharp": "^0.33.5"
+    "jimp": "^1.6.0"
   },
   "devDependencies": {
     "@types/node": "^20.17.0",
