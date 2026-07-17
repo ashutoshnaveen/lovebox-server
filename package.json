@@ -1,0 +1,24 @@
+{
+  "name": "lovebox-server",
+  "version": "1.0.0",
+  "description": "Lovebox IoT backend and PWA sender page",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "rm -rf dist && mkdir -p dist && cp -r public/* dist/",
+    "dev": "netlify dev",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@netlify/blobs": "^8.1.0",
+    "sharp": "^0.33.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.0",
+    "netlify-cli": "^17.38.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

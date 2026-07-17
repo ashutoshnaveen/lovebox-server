@@ -1,0 +1,18 @@
+{
+  "name": "Lovebox",
+  "short_name": "Lovebox",
+  "description": "Send photos to your Lovebox device",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0f",
+  "theme_color": "#ff4d6d",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#ff4d6d">
+  <title>Lovebox</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icon.svg">
+  <link rel="stylesheet" href="/lovebox.css">
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <div class="heart">❤</div>
+      <h1>Lovebox</h1>
+      <p class="tagline">Send a little love</p>
+    </header>
+
+    <form id="sendForm" class="form" novalidate>
+      <div class="field">
+        <label for="passcode">Passcode</label>
+        <input type="password" id="passcode" name="passcode" required autocomplete="off" placeholder="Shared secret">
+      </div>
+
+      <div class="field">
+        <label for="deviceId">Device</label>
+        <select id="deviceId" name="deviceId" required>
+          <option value="lovebox-001" selected>Lovebox 001</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <label for="senderName">From</label>
+        <input type="text" id="senderName" name="senderName" placeholder="Your name" maxlength="60">
+      </div>
+
+      <div class="field">
+        <label for="image">Photo</label>
+        <input type="file" id="image" name="image" accept="image/*" capture="environment" required>
+        <div id="preview" class="preview hidden">
+          <img id="previewImg" alt="Preview">
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="caption">Caption <span class="optional">(optional)</span></label>
+        <textarea id="caption" name="caption" rows="2" maxlength="120" placeholder="A short note..."></textarea>
+        <div class="char-count"><span id="captionCount">0</span>/120</div>
+      </div>
+
+      <button type="submit" id="sendBtn" class="send-btn" disabled>
+        <span class="btn-text">Send to Lovebox</span>
+        <span class="btn-spinner hidden">Sending...</span>
+      </button>
+    </form>
+
+    <div id="status" class="status hidden"></div>
+
+    <div id="lastSent" class="last-sent hidden">
+      <h2>Last sent</h2>
+      <p id="lastSentMeta"></p>
+    </div>
+  </div>
+
+  <script src="/lovebox.js"></script>
+</body>
+</html>
