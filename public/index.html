@@ -63,11 +63,14 @@
       <p id="lastSentMeta"></p>
     </div>
 
-    <div id="feedback" class="feedback hidden">
-      <h2>Feedback</h2>
-      <p id="feedbackMeta"></p>
-      <img id="feedbackImage" class="feedback-image hidden" alt="Response">
-    </div>
+    <section id="feedback" class="feedback hidden" aria-live="polite">
+      <div class="feedback-header">
+        <h2>Feedback history</h2>
+        <button id="refreshFeedback" type="button" class="refresh-btn">Refresh</button>
+      </div>
+      <p id="feedbackStatus" class="feedback-status hidden"></p>
+      <div id="feedbackTimeline" class="feedback-timeline"></div>
+    </section>
   </div>
 
   <script src="/lovebox.js"></script>

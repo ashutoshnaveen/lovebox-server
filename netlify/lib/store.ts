@@ -47,12 +47,24 @@ export async function acknowledgeMessage(deviceId: string, acknowledgedAt: strin
 
 export async function saveFeedback(feedback: LoveboxFeedback): Promise<void> {
   const store = feedbackStore();
-  await store.setJSON(`latest:${feedback.deviceId}`, feedback);
+  const eventKey = `events:${feedback.deviceId}:${feedback.createdAt}:${feedback.id}`;
+  await Promise.all([
+    store.setJSON(`latest:${feedback.deviceId}`, feedback),
+    store.setJSON(eventKey, feedback),
+  ]);
 }
 
 export async function getLatestFeedback(deviceId: string): Promise<LoveboxFeedback | null> {
   const store = feedbackStore();
   return (await store.get(`latest:${deviceId}`, { type: "json" })) as LoveboxFeedback | null;
+}
+
+export async function getFeedbackHistory(deviceId: string, limit = 20): Promise<LoveboxFeedback[]> {
+  const store = feedbackStore();
+  const { blobs } = await store.list({ prefix: `events:${deviceId}:` });
+  const keys = blobs.map((blob) => blob.key).sort().reverse().slice(0, limit);
+  const events = await Promise.all(keys.map((key) => store.get(key, { type: "json" })));
+  return events as LoveboxFeedback[];
 }
 
 export async function saveFeedbackImage(imageId: string, buffer: Buffer): Promise<void> {

@@ -1,8 +1,8 @@
 import { Jimp } from "jimp";
 import { validateDeviceKey, validateSenderPasscode } from "../lib/auth";
 import {
+  getFeedbackHistory,
   getFeedbackImage,
-  getLatestFeedback,
   saveFeedback,
   saveFeedbackImage,
 } from "../lib/store";
@@ -128,20 +128,17 @@ async function handleGet(request: Request) {
     return jsonResponse({ ok: false, error: "Invalid or missing passcode" }, 401);
   }
 
-  const feedback = await getLatestFeedback(deviceId);
-  if (!feedback) {
-    return jsonResponse({ ok: true, data: null }, 200);
-  }
-
-  let imageData: string | null = null;
-  if (feedback.imageId) {
-    const image = await getFeedbackImage(feedback.imageId);
-    if (image) {
-      imageData = `data:image/png;base64,${image.toString("base64")}`;
+  const feedback = await getFeedbackHistory(deviceId, 20);
+  const data = await Promise.all(feedback.map(async (event) => {
+    let imageData: string | null = null;
+    if (event.imageId) {
+      const image = await getFeedbackImage(event.imageId);
+      if (image) imageData = `data:image/png;base64,${image.toString("base64")}`;
     }
-  }
+    return { ...event, imageData };
+  }));
 
-  return jsonResponse({ ok: true, data: feedback, imageData }, 200);
+  return jsonResponse({ ok: true, data }, 200);
 }
 
 function jsonResponse(body: object, status: number): Response {

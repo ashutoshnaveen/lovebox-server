@@ -12,11 +12,12 @@ const statusEl = document.getElementById('status');
 const lastSent = document.getElementById('lastSent');
 const lastSentMeta = document.getElementById('lastSentMeta');
 const feedbackEl = document.getElementById('feedback');
-const feedbackMeta = document.getElementById('feedbackMeta');
-const feedbackImage = document.getElementById('feedbackImage');
+const feedbackStatus = document.getElementById('feedbackStatus');
+const feedbackTimeline = document.getElementById('feedbackTimeline');
+const refreshFeedbackBtn = document.getElementById('refreshFeedback');
 
 let selectedFile = null;
-let lastFeedbackId = null;
+let feedbackSignature = null;
 
 passcodeInput.value = localStorage.getItem('lovebox_passcode') || '';
 document.getElementById('senderName').value = localStorage.getItem('lovebox_sender') || '';
@@ -34,38 +35,87 @@ function startFeedbackPolling() {
 async function checkFeedback() {
   const deviceId = document.getElementById('deviceId').value;
   const passcode = passcodeInput.value;
-  if (!passcode || !deviceId) return;
+  if (!passcode || !deviceId) {
+    feedbackEl.classList.add('hidden');
+    return;
+  }
 
+  feedbackEl.classList.remove('hidden');
   try {
     const response = await fetch(`/.netlify/functions/lovebox-feedback?deviceId=${encodeURIComponent(deviceId)}`, {
       headers: { 'X-Lovebox-Passcode': passcode },
     });
     const result = await response.json();
-    if (!response.ok || !result.ok || !result.data) {
-      feedbackEl.classList.add('hidden');
+
+    if (!response.ok) {
+      showFeedbackStatus(result.error || `Server error ${response.status}`, true);
+      return;
+    }
+    if (!result.ok) {
+      showFeedbackStatus(result.error || 'No feedback data', false);
+      return;
+    }
+    if (!result.data.length) {
+      showFeedbackStatus('No feedback yet. Send a like or drawing from the Lovebox.', false);
+      feedbackTimeline.replaceChildren();
+      feedbackSignature = null;
       return;
     }
 
-    if (result.data.id === lastFeedbackId) return;
-    lastFeedbackId = result.data.id;
-
-    feedbackEl.classList.remove('hidden');
-    if (result.data.type === 'like') {
-      feedbackMeta.textContent = `${FEEDBACK_ICONS.like} She liked your photo!`;
-      feedbackImage.classList.add('hidden');
-    } else if (result.data.type === 'draw') {
-      feedbackMeta.textContent = `${FEEDBACK_ICONS.draw} She drew this back:`;
-      if (result.imageData) {
-        feedbackImage.src = result.imageData;
-        feedbackImage.classList.remove('hidden');
-      } else {
-        feedbackImage.classList.add('hidden');
-      }
-    }
+    const signature = result.data.map((event) => event.id).join(':');
+    if (signature === feedbackSignature) return;
+    feedbackSignature = signature;
+    feedbackStatus.classList.add('hidden');
+    renderFeedbackTimeline(result.data);
   } catch (err) {
     console.error('Feedback check failed', err);
+    showFeedbackStatus('Network error. Check connection.', true);
   }
 }
+
+function renderFeedbackTimeline(events) {
+  feedbackTimeline.replaceChildren(...events.map((event) => {
+    const item = document.createElement('article');
+    item.className = 'feedback-event';
+
+    const details = document.createElement('div');
+    details.className = 'feedback-event-details';
+
+    const summary = document.createElement('p');
+    summary.className = 'feedback-event-summary';
+    summary.textContent = event.type === 'like'
+      ? `${FEEDBACK_ICONS.like} She liked a photo`
+      : `${FEEDBACK_ICONS.draw} She drew a response`;
+
+    const meta = document.createElement('p');
+    meta.className = 'feedback-event-meta';
+    meta.textContent = `${new Date(event.createdAt).toLocaleString()} · Image ${event.messageId}`;
+
+    details.append(summary, meta);
+    item.append(details);
+
+    if (event.type === 'draw' && event.imageData) {
+      const image = document.createElement('img');
+      image.className = 'feedback-image';
+      image.src = event.imageData;
+      image.alt = `Drawing response to image ${event.messageId}`;
+      item.append(image);
+    }
+
+    return item;
+  }));
+}
+
+function showFeedbackStatus(text, isError) {
+  feedbackStatus.textContent = text;
+  feedbackStatus.classList.remove('hidden', 'error');
+  if (isError) feedbackStatus.classList.add('error');
+}
+
+refreshFeedbackBtn.addEventListener('click', () => {
+  feedbackSignature = null;
+  checkFeedback();
+});
 
 startFeedbackPolling();
 
