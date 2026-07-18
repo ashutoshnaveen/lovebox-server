@@ -9,6 +9,17 @@ export interface LoveboxMessage {
   acknowledgedAt?: string;
 }
 
+export interface LoveboxFeedback {
+  id: string;
+  deviceId: string;
+  messageId: string;
+  type: "like" | "draw";
+  imageId?: string;
+  likedAt?: string;
+  drawnAt?: string;
+  createdAt: string;
+}
+
 export interface JsonResponse<T> {
   ok: boolean;
   data?: T;

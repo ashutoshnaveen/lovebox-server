@@ -11,11 +11,63 @@ const btnSpinner = sendBtn.querySelector('.btn-spinner');
 const statusEl = document.getElementById('status');
 const lastSent = document.getElementById('lastSent');
 const lastSentMeta = document.getElementById('lastSentMeta');
+const feedbackEl = document.getElementById('feedback');
+const feedbackMeta = document.getElementById('feedbackMeta');
+const feedbackImage = document.getElementById('feedbackImage');
 
 let selectedFile = null;
+let lastFeedbackId = null;
 
 passcodeInput.value = localStorage.getItem('lovebox_passcode') || '';
 document.getElementById('senderName').value = localStorage.getItem('lovebox_sender') || '';
+
+const FEEDBACK_ICONS = {
+  like: '❤️',
+  draw: '✍️',
+};
+
+function startFeedbackPolling() {
+  checkFeedback();
+  setInterval(checkFeedback, 5000);
+}
+
+async function checkFeedback() {
+  const deviceId = document.getElementById('deviceId').value;
+  const passcode = passcodeInput.value;
+  if (!passcode || !deviceId) return;
+
+  try {
+    const response = await fetch(`/.netlify/functions/lovebox-feedback?deviceId=${encodeURIComponent(deviceId)}`, {
+      headers: { 'X-Lovebox-Passcode': passcode },
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok || !result.data) {
+      feedbackEl.classList.add('hidden');
+      return;
+    }
+
+    if (result.data.id === lastFeedbackId) return;
+    lastFeedbackId = result.data.id;
+
+    feedbackEl.classList.remove('hidden');
+    if (result.data.type === 'like') {
+      feedbackMeta.textContent = `${FEEDBACK_ICONS.like} She liked your photo!`;
+      feedbackImage.classList.add('hidden');
+    } else if (result.data.type === 'draw') {
+      feedbackMeta.textContent = `${FEEDBACK_ICONS.draw} She drew this back:`;
+      if (result.imageData) {
+        feedbackImage.src = result.imageData;
+        feedbackImage.classList.remove('hidden');
+      } else {
+        feedbackImage.classList.add('hidden');
+      }
+    }
+  } catch (err) {
+    console.error('Feedback check failed', err);
+  }
+}
+
+startFeedbackPolling();
 
 imageInput.addEventListener('change', (e) => {
   selectedFile = e.target.files[0] || null;

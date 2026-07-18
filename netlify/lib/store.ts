@@ -1,5 +1,5 @@
 import { getStore } from "@netlify/blobs";
-import type { LoveboxMessage } from "./types.ts";
+import type { LoveboxFeedback, LoveboxMessage } from "./types.ts";
 
 function messagesStore() {
   return getStore({ name: "lovebox-messages", consistency: "strong" });
@@ -7,6 +7,14 @@ function messagesStore() {
 
 function imagesStore() {
   return getStore({ name: "lovebox-images", consistency: "strong" });
+}
+
+function feedbackStore() {
+  return getStore({ name: "lovebox-feedback", consistency: "strong" });
+}
+
+function feedbackImagesStore() {
+  return getStore({ name: "lovebox-feedback-images", consistency: "strong" });
 }
 
 export async function getLatestMessage(deviceId: string): Promise<LoveboxMessage | null> {
@@ -35,4 +43,25 @@ export async function acknowledgeMessage(deviceId: string, acknowledgedAt: strin
   if (!message) return;
   message.acknowledgedAt = acknowledgedAt;
   await store.setJSON(`latest:${message.deviceId}`, message);
+}
+
+export async function saveFeedback(feedback: LoveboxFeedback): Promise<void> {
+  const store = feedbackStore();
+  await store.setJSON(`latest:${feedback.deviceId}`, feedback);
+}
+
+export async function getLatestFeedback(deviceId: string): Promise<LoveboxFeedback | null> {
+  const store = feedbackStore();
+  return (await store.get(`latest:${deviceId}`, { type: "json" })) as LoveboxFeedback | null;
+}
+
+export async function saveFeedbackImage(imageId: string, buffer: Buffer): Promise<void> {
+  const store = feedbackImagesStore();
+  await store.set(`image:${imageId}`, buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer);
+}
+
+export async function getFeedbackImage(imageId: string): Promise<Buffer | null> {
+  const store = feedbackImagesStore();
+  const data = await store.get(`image:${imageId}`, { type: "arrayBuffer" });
+  return data ? Buffer.from(data) : null;
 }

@@ -6,9 +6,11 @@
   - Downloads 320x240 RGB565 binary and renders it on ILI9341
   - Animates SG90 servo on new image
   - Stores last processed image ID in NVS (Preferences)
+  - XPT2046 touchscreen: heart like, pen toolbar, drawing feedback
 
   Required libraries:
     - LovyanGFX
+    - XPT2046_Touchscreen
     - WiFiManager
     - ArduinoJson
     - ESP32Servo
@@ -23,6 +25,8 @@
 #include <FFat.h>
 #include <ESP32Servo.h>
 #include <LovyanGFX.hpp>
+#include <SPI.h>
+#include <XPT2046_Touchscreen.h>
 
 // ---------------------------------------------------------------------------
 // User configuration
@@ -38,6 +42,19 @@ const char* API_HOST = "https://effervescent-scone-29511f.netlify.app";
 #define TFT_MOSI  11
 #define TFT_SCK   12
 #define TFT_MISO  13
+
+// ---------------- Touch pins (shared SPI bus, separate CS) ----------------
+#define TOUCH_CS   16
+#define TOUCH_IRQ  17
+#define TOUCH_MOSI 11
+#define TOUCH_MISO 13
+#define TOUCH_SCK  12
+
+// Calibration for current 320x240 landscape orientation (tft.setRotation(1))
+const int RAW_X_MIN = 450;
+const int RAW_X_MAX = 3905;
+const int RAW_Y_MIN = 343;
+const int RAW_Y_MAX = 3795;
 
 // Set true only once when you deliberately want to erase saved Wi-Fi
 #define ERASE_SAVED_WIFI false
@@ -112,6 +129,7 @@ Servo heartServo;
 WiFiClientSecure secureClient;
 HTTPClient http;
 Preferences prefs;
+XPT2046_Touchscreen touch(TOUCH_CS, TOUCH_IRQ);
 
 String lastProcessedId;
 String lastImageError;
@@ -124,6 +142,46 @@ struct LatestMessage {
   String senderName;
   bool valid;
 };
+
+// ---------------------------------------------------------------------------
+// Touch overlay / UI state
+// ---------------------------------------------------------------------------
+struct Button {
+  int x, y, w, h;
+};
+
+const Button heartBtn = { 275, 5, 40, 30 };
+const Button penBtn = { 5, 205, 30, 30 };
+
+const int TOOLBAR_Y = 200;
+const int TOOLBAR_H = 40;
+const Button drawBtn = { 10, 205, 70, 30 };
+const Button clearBtn = { 90, 205, 70, 30 };
+const Button sendBtn = { 170, 205, 70, 30 };
+const Button closeBtn = { 250, 205, 60, 30 };
+
+// 1-bit overlay: 320 * 240 / 8 = 9600 bytes
+uint8_t overlayBuffer[(SCREEN_WIDTH * SCREEN_HEIGHT) / 8];
+
+bool toolbarVisible = false;
+bool drawModeActive = false;
+
+bool touchReady = false;
+bool wasTouched = false;
+int touchStartX = 0;
+int touchStartY = 0;
+int touchLastX = 0;
+int touchLastY = 0;
+bool touchMoved = false;
+unsigned long lastPollAt = 0;
+
+String toastText;
+unsigned long toastUntil = 0;
+
+// Forward declarations for touch event handlers
+void handleTap(int x, int y);
+bool sendLikeFeedback();
+bool sendDrawingFeedback();
 
 // ---------------------------------------------------------------------------
 // Screen helpers
@@ -217,6 +275,263 @@ void saveConfigCallback() {
 }
 
 // ---------------------------------------------------------------------------
+// Touch overlay helpers
+// ---------------------------------------------------------------------------
+int mapTouchToScreenX(int rawY) {
+  return constrain(map(rawY, RAW_Y_MAX, RAW_Y_MIN, 0, SCREEN_WIDTH - 1), 0, SCREEN_WIDTH - 1);
+}
+
+int mapTouchToScreenY(int rawX) {
+  return constrain(map(rawX, RAW_X_MIN, RAW_X_MAX, 0, SCREEN_HEIGHT - 1), 0, SCREEN_HEIGHT - 1);
+}
+
+bool isInButton(int x, int y, const Button& btn) {
+  return x >= btn.x && x < btn.x + btn.w && y >= btn.y && y < btn.y + btn.h;
+}
+
+bool isInAnyControl(int x, int y) {
+  if (isInButton(x, y, heartBtn)) return true;
+  if (!toolbarVisible) {
+    if (isInButton(x, y, penBtn)) return true;
+  } else {
+    if (isInButton(x, y, drawBtn)) return true;
+    if (isInButton(x, y, clearBtn)) return true;
+    if (isInButton(x, y, sendBtn)) return true;
+    if (isInButton(x, y, closeBtn)) return true;
+  }
+  return false;
+}
+
+bool getOverlayPixel(int x, int y) {
+  if (x < 0 || x >= SCREEN_WIDTH || y < 0 || y >= SCREEN_HEIGHT) return false;
+  int idx = y * SCREEN_WIDTH + x;
+  return overlayBuffer[idx >> 3] & (1 << (idx & 7));
+}
+
+void setOverlayPixel(int x, int y) {
+  if (x < 0 || x >= SCREEN_WIDTH || y < 0 || y >= SCREEN_HEIGHT) return;
+  int idx = y * SCREEN_WIDTH + x;
+  int byteIdx = idx >> 3;
+  uint8_t bit = 1 << (idx & 7);
+  if (overlayBuffer[byteIdx] & bit) return;
+  overlayBuffer[byteIdx] |= bit;
+  tft.drawPixel(x, y, TFT_WHITE);
+}
+
+void clearOverlay() {
+  memset(overlayBuffer, 0, sizeof(overlayBuffer));
+}
+
+void drawLine(int x0, int y0, int x1, int y1) {
+  int dx = abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+  int dy = -abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+  int err = dx + dy;
+
+  tft.startWrite();
+  while (true) {
+    setOverlayPixel(x0, y0);
+    if (x0 == x1 && y0 == y1) break;
+    int e2 = 2 * err;
+    if (e2 >= dy) { err += dy; x0 += sx; }
+    if (e2 <= dx) { err += dx; y0 += sy; }
+  }
+  tft.endWrite();
+}
+
+void resetFeedbackState() {
+  clearOverlay();
+  toolbarVisible = false;
+  drawModeActive = false;
+}
+
+// ---------------------------------------------------------------------------
+// UI rendering
+// ---------------------------------------------------------------------------
+void drawButton(const Button& btn, uint16_t color, const char* label) {
+  tft.fillRoundRect(btn.x, btn.y, btn.w, btn.h, 4, color);
+  tft.setTextColor(ILI9341_WHITE, color);
+  tft.setTextSize(1);
+  int16_t textWidth = strlen(label) * 6;
+  tft.setCursor(btn.x + (btn.w - textWidth) / 2, btn.y + (btn.h - 8) / 2);
+  tft.print(label);
+}
+
+void renderUI() {
+  drawButton(heartBtn, ILI9341_RED, "<3");
+
+  if (!toolbarVisible) {
+    drawButton(penBtn, ILI9341_BLUE, "PEN");
+  } else {
+    tft.fillRect(0, TOOLBAR_Y, SCREEN_WIDTH, TOOLBAR_H, ILI9341_BLACK);
+    drawButton(drawBtn, drawModeActive ? ILI9341_GREEN : ILI9341_BLUE, "DRAW");
+    drawButton(clearBtn, ILI9341_YELLOW, "CLR");
+    drawButton(sendBtn, ILI9341_PINK, "SEND");
+    drawButton(closeBtn, ILI9341_RED, "X");
+  }
+}
+
+void renderScreen() {
+  displayStoredImage();
+  renderUI();
+}
+
+void showToast(const String& text) {
+  toastText = text;
+  toastUntil = millis() + 1500;
+  tft.fillRect(60, 100, 200, 40, ILI9341_BLACK);
+  tft.drawRect(60, 100, 200, 40, ILI9341_WHITE);
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
+  tft.setTextSize(2);
+  tft.setCursor(80, 113);
+  tft.print(text);
+}
+
+void clearToast() {
+  if (toastUntil > 0 && millis() > toastUntil) {
+    toastUntil = 0;
+    renderScreen();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Touch handling
+// ---------------------------------------------------------------------------
+void handleTouch() {
+  if (!touchReady) return;
+
+  TS_Point p = touch.getPoint();
+  bool isTouched = touch.touched() && p.z > 200;
+
+  if (!wasTouched && isTouched) {
+    touchStartX = mapTouchToScreenX(p.y);
+    touchStartY = mapTouchToScreenY(p.x);
+    touchLastX = touchStartX;
+    touchLastY = touchStartY;
+    touchMoved = false;
+  } else if (wasTouched && isTouched) {
+    int x = mapTouchToScreenX(p.y);
+    int y = mapTouchToScreenY(p.x);
+    if (abs(x - touchStartX) > 5 || abs(y - touchStartY) > 5) touchMoved = true;
+
+    if (drawModeActive && !isInAnyControl(x, y)) {
+      drawLine(touchLastX, touchLastY, x, y);
+    }
+    touchLastX = x;
+    touchLastY = y;
+  } else if (wasTouched && !isTouched) {
+    if (!touchMoved) {
+      handleTap(touchStartX, touchStartY);
+    }
+  }
+  wasTouched = isTouched;
+}
+
+void handleTap(int x, int y) {
+  if (isInButton(x, y, heartBtn)) {
+    if (sendLikeFeedback()) {
+      showToast("Liked!");
+    } else {
+      showToast("Like failed");
+    }
+    return;
+  }
+
+  if (toolbarVisible) {
+    if (isInButton(x, y, drawBtn)) {
+      drawModeActive = !drawModeActive;
+      renderUI();
+    } else if (isInButton(x, y, clearBtn)) {
+      clearOverlay();
+      renderScreen();
+    } else if (isInButton(x, y, sendBtn)) {
+      bool ok = sendDrawingFeedback();
+      resetFeedbackState();
+      renderScreen();
+      showToast(ok ? "Sent!" : "Send failed");
+    } else if (isInButton(x, y, closeBtn)) {
+      drawModeActive = false;
+      toolbarVisible = false;
+      renderScreen();
+    }
+  } else {
+    if (isInButton(x, y, penBtn)) {
+      toolbarVisible = true;
+      renderUI();
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Network feedback
+// ---------------------------------------------------------------------------
+bool sendLikeFeedback() {
+  if (lastProcessedId.length() == 0) return false;
+
+  String url = String(API_HOST) + "/.netlify/functions/lovebox-feedback?deviceId=" + DEVICE_ID;
+  http.begin(secureClient, url);
+  http.addHeader("X-Device-Key", DEVICE_KEY);
+  http.addHeader("Content-Type", "application/json");
+  http.setTimeout(HTTP_TIMEOUT_MS);
+
+  String payload = "{\"type\":\"like\",\"messageId\":\"" + lastProcessedId + "\"}";
+  int httpCode = http.POST(payload);
+  http.end();
+
+  Serial.printf("like feedback HTTP %d\\n", httpCode);
+  return httpCode == 200;
+}
+
+bool sendDrawingFeedback() {
+  if (lastProcessedId.length() == 0 || !imageStorageReady || !FFat.exists(IMAGE_PATH)) {
+    return false;
+  }
+
+  File imageFile = FFat.open(IMAGE_PATH, FILE_READ);
+  if (!imageFile || imageFile.size() != IMAGE_SIZE) {
+    if (imageFile) imageFile.close();
+    return false;
+  }
+
+  uint8_t* composed = new uint8_t[IMAGE_SIZE];
+  if (!composed) {
+    imageFile.close();
+    return false;
+  }
+
+  if (imageFile.read(composed, IMAGE_SIZE) != IMAGE_SIZE) {
+    delete[] composed;
+    imageFile.close();
+    return false;
+  }
+  imageFile.close();
+
+  for (int y = 0; y < SCREEN_HEIGHT; y++) {
+    for (int x = 0; x < SCREEN_WIDTH; x++) {
+      if (getOverlayPixel(x, y)) {
+        int idx = (y * SCREEN_WIDTH + x) * 2;
+        composed[idx] = 0xFF;
+        composed[idx + 1] = 0xFF;
+      }
+    }
+  }
+
+  String url = String(API_HOST) + "/.netlify/functions/lovebox-feedback?deviceId=" + DEVICE_ID;
+  http.begin(secureClient, url);
+  http.addHeader("X-Device-Key", DEVICE_KEY);
+  http.addHeader("Content-Type", "application/octet-stream");
+  http.addHeader("X-Feedback-Type", "draw");
+  http.addHeader("X-Message-Id", lastProcessedId);
+  http.setTimeout(HTTP_TIMEOUT_MS);
+
+  int httpCode = http.sendRequest("POST", composed, IMAGE_SIZE);
+  http.end();
+
+  delete[] composed;
+  Serial.printf("draw feedback HTTP %d\\n", httpCode);
+  return httpCode == 200;
+}
+
+// ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
 void setup() {
@@ -230,6 +545,11 @@ void setup() {
   tft.setRotation(1);
   Serial.println("TFT initialized");
   tft.fillScreen(ILI9341_BLACK);
+
+  // Touch setup (shared SPI pins with TFT, separate CS)
+  SPI.begin(TOUCH_SCK, TOUCH_MISO, TOUCH_MOSI, TOUCH_CS);
+  touchReady = touch.begin(SPI);
+  Serial.printf("Touch ready: %s\n", touchReady ? "yes" : "no");
 
   // Servo setup
   heartServo.setPeriodHertz(50);
@@ -327,6 +647,8 @@ void setup() {
     showScreen("WAITING", "Waiting for love...", "", ILI9341_PINK);
   } else {
     Serial.println("Cached image displayed");
+    resetFeedbackState();
+    renderUI();
   }
 }
 
@@ -334,6 +656,9 @@ void setup() {
 // Main loop
 // ---------------------------------------------------------------------------
 void loop() {
+  handleTouch();
+  clearToast();
+
   if (WiFi.status() != WL_CONNECTED) {
     showScreen("NO WI-FI", "Wi-Fi lost", "Reconnecting...", ILI9341_RED);
     WiFi.reconnect();
@@ -341,21 +666,28 @@ void loop() {
     return;
   }
 
-  LatestMessage msg = fetchLatestMessage();
+  if (millis() - lastPollAt >= POLL_INTERVAL_MS) {
+    lastPollAt = millis();
 
-  if (msg.valid && msg.id != lastProcessedId) {
-    if (downloadAndDisplayImage(msg.imageId)) {
-      animateHeart();
-      lastProcessedId = msg.id;
-      prefs.putString("lastId", lastProcessedId);
-      sendAck();
-    } else {
-      showScreen("OOPS", "Image failed", lastImageError, ILI9341_RED);
-      delay(2000);
+    LatestMessage msg = fetchLatestMessage();
+
+    if (msg.valid && msg.id != lastProcessedId) {
+      if (downloadAndDisplayImage(msg.imageId)) {
+        animateHeart();
+        lastProcessedId = msg.id;
+        prefs.putString("lastId", lastProcessedId);
+        resetFeedbackState();
+        renderUI();
+        sendAck();
+      } else {
+        showScreen("OOPS", "Image failed", lastImageError, ILI9341_RED);
+        delay(2000);
+        renderScreen();
+      }
     }
   }
 
-  delay(POLL_INTERVAL_MS);
+  delay(10);
 }
 
 // ---------------------------------------------------------------------------
