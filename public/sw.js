@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lovebox-v1';
+const CACHE_NAME = 'lovebox-v2';
 const ASSETS = ['/', '/lovebox.css', '/lovebox.js', '/manifest.json', '/icon.svg'];
 
 self.addEventListener('install', (event) => {
@@ -9,7 +9,11 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    caches.keys().then((keys) =>
+      Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))
+    ).then(() => self.clients.claim())
+  );
 });
 
 self.addEventListener('fetch', (event) => {
@@ -17,12 +21,14 @@ self.addEventListener('fetch', (event) => {
   if (event.request.url.includes('/.netlify/functions/')) return;
 
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      return cached || fetch(event.request).then((response) => {
-        const clone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+    fetch(event.request)
+      .then((response) => {
+        if (response.ok) {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        }
         return response;
-      });
-    })
+      })
+      .catch(() => caches.match(event.request))
   );
 });
