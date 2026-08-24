@@ -15,6 +15,10 @@ const feedbackEl = document.getElementById('feedback');
 const feedbackStatus = document.getElementById('feedbackStatus');
 const feedbackTimeline = document.getElementById('feedbackTimeline');
 const refreshFeedbackBtn = document.getElementById('refreshFeedback');
+const deviceHealth = document.getElementById('deviceHealth');
+const healthStatus = document.getElementById('healthStatus');
+const healthGrid = document.getElementById('healthGrid');
+const refreshHealthBtn = document.getElementById('refreshHealth');
 
 let selectedFile = null;
 let feedbackSignature = null;
@@ -30,6 +34,69 @@ const FEEDBACK_ICONS = {
 function startFeedbackPolling() {
   checkFeedback();
   setInterval(checkFeedback, 5000);
+}
+
+function startHealthPolling() {
+  checkHealth();
+  setInterval(checkHealth, 30000);
+}
+
+async function checkHealth() {
+  const deviceId = document.getElementById('deviceId').value;
+  const passcode = passcodeInput.value;
+  if (!passcode || !deviceId) {
+    deviceHealth.classList.add('hidden');
+    return;
+  }
+
+  deviceHealth.classList.remove('hidden');
+  try {
+    const response = await fetch(`/.netlify/functions/lovebox-health?deviceId=${encodeURIComponent(deviceId)}`, {
+      headers: { 'X-Lovebox-Passcode': passcode },
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) {
+      showHealthStatus(result.error || `Server error ${response.status}`, true);
+      return;
+    }
+    if (!result.data) {
+      showHealthStatus('No health report received yet.', false);
+      healthGrid.replaceChildren();
+      return;
+    }
+    healthStatus.classList.add('hidden');
+    renderHealth(result.data, result.backendVersion);
+  } catch (err) {
+    console.error('Health check failed', err);
+    showHealthStatus('Network error. Check connection.', true);
+  }
+}
+
+function renderHealth(health, backendVersion) {
+  const rows = [
+    ['Firmware', health.firmwareVersion],
+    ['Backend', backendVersion || 'unknown'],
+    ['Wi-Fi', `${health.wifiRssi} dBm`],
+    ['Free heap', `${Math.round(health.freeHeap / 1024)} KB`],
+    ['FFat', health.ffatMounted ? `${Math.round(health.ffatUsed / 1024)} / ${Math.round(health.ffatTotal / 1024)} KB` : 'Not mounted'],
+    ['Display', health.displayReady ? 'Ready' : 'Unavailable'],
+    ['Touch', health.touchReady ? 'Ready' : 'Unavailable'],
+    ['Servo', health.servoReady ? 'Ready' : 'Unavailable'],
+    ['Last report', new Date(health.reportedAt).toLocaleString()],
+  ];
+  healthGrid.replaceChildren(...rows.flatMap(([label, value]) => {
+    const term = document.createElement('dt');
+    term.textContent = label;
+    const detail = document.createElement('dd');
+    detail.textContent = value;
+    return [term, detail];
+  }));
+}
+
+function showHealthStatus(text, isError) {
+  healthStatus.textContent = text;
+  healthStatus.classList.remove('hidden', 'error');
+  if (isError) healthStatus.classList.add('error');
 }
 
 async function checkFeedback() {
@@ -117,7 +184,10 @@ refreshFeedbackBtn.addEventListener('click', () => {
   checkFeedback();
 });
 
+refreshHealthBtn.addEventListener('click', checkHealth);
+
 startFeedbackPolling();
+startHealthPolling();
 
 imageInput.addEventListener('change', (e) => {
   selectedFile = e.target.files[0] || null;

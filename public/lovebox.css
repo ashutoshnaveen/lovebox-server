@@ -207,6 +207,41 @@ textarea {
   border-left: 4px solid var(--accent);
 }
 
+.device-health {
+  margin-top: 24px;
+  padding: 16px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border-left: 4px solid var(--success);
+}
+
+.device-health h2 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--muted);
+}
+
+.health-grid {
+  display: grid;
+  grid-template-columns: minmax(100px, 0.7fr) minmax(0, 1.3fr);
+  gap: 8px 16px;
+  margin: 12px 0 0;
+}
+
+.health-grid dt,
+.health-grid dd {
+  margin: 0;
+  font-size: 13px;
+}
+
+.health-grid dt {
+  color: var(--muted);
+}
+
+.health-grid dd {
+  overflow-wrap: anywhere;
+}
+
 .feedback-header {
   display: flex;
   justify-content: space-between;

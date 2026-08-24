@@ -63,6 +63,15 @@
       <p id="lastSentMeta"></p>
     </div>
 
+    <section id="deviceHealth" class="device-health hidden" aria-live="polite">
+      <div class="feedback-header">
+        <h2>Device status</h2>
+        <button id="refreshHealth" type="button" class="refresh-btn">Refresh</button>
+      </div>
+      <p id="healthStatus" class="feedback-status hidden"></p>
+      <dl id="healthGrid" class="health-grid"></dl>
+    </section>
+
     <section id="feedback" class="feedback hidden" aria-live="polite">
       <div class="feedback-header">
         <h2>Feedback history</h2>
