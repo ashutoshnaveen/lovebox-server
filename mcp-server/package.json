@@ -1,0 +1,15 @@
+{
+  "name": "mcp-server",
+  "version": "0.1.0",
+  "description": "Minimal MCP server for local VS Code integration (Windows)",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}
