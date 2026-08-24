@@ -6,16 +6,14 @@ All timestamps are ISO-8601 UTC strings.
 
 ## Endpoints
 
-### 1. Health check
+### 1. Device health
 
 ```
-GET /.netlify/functions/lovebox-health
+GET /.netlify/functions/lovebox-health?deviceId=lovebox-001
+POST /.netlify/functions/lovebox-health?deviceId=lovebox-001
 ```
 
-Response:
-```json
-{ "ok": true }
-```
+Both methods require `X-Device-Key`. `POST` stores the latest device report; `GET` retrieves it.
 
 ### 2. Send an image
 
@@ -107,7 +105,8 @@ Response:
 
 Health:
 ```bash
-curl https://<site>.netlify.app/.netlify/functions/lovebox-health
+curl https://<site>.netlify.app/.netlify/functions/lovebox-health?deviceId=lovebox-001 \
+  -H "X-Device-Key: your-device-key"
 ```
 
 Send image:

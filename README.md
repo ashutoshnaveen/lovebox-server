@@ -68,7 +68,7 @@ See [`docs/lovebox-api.md`](docs/lovebox-api.md) for full curl examples.
 
 Quick health check:
 ```bash
-curl https://<site-name>.netlify.app/.netlify/functions/lovebox-health
+curl "https://<site-name>.netlify.app/.netlify/functions/lovebox-health?deviceId=lovebox-001" -H "X-Device-Key: your-device-key"
 ```
 
 ## ESP32 firmware

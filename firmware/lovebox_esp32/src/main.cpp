@@ -26,6 +26,7 @@
 #include <LovyanGFX.hpp>
 #include <SPI.h>
 #include <XPT2046_Touchscreen.h>
+#include <esp_system.h>
 
 // ---------------------------------------------------------------------------
 // User configuration
@@ -33,6 +34,7 @@
 const char* DEVICE_ID = "lovebox-001";
 const char* DEVICE_KEY = "32b65c99d66ee1a4093e214ce55bc786495bb1421140ae268d7f0b3fdbab6730";
 const char* API_HOST = "https://effervescent-scone-29511f.netlify.app";
+const char* FIRMWARE_VERSION = "1.0.0";
 
 // ---------------- TFT pins ----------------
 #undef TFT_CS
@@ -66,6 +68,7 @@ const int RAW_Y_MAX = 3795;
 const int POLL_INTERVAL_MS = 5000;
 const int HTTP_TIMEOUT_MS = 20000;
 const int DOWNLOAD_TIMEOUT_MS = 30000;
+const unsigned long HEALTH_INTERVAL_MS = 15UL * 60UL * 1000UL;
 
 const int SERVO_PIN = 15;
 const int SERVO_BASE_ANGLE = 90;
@@ -139,6 +142,10 @@ String lastProcessedId;
 String lastImageError;
 String currentCaption;
 bool imageStorageReady = false;
+bool displayReady = false;
+bool servoReady = false;
+unsigned long lastHealthAt = 0;
+unsigned long lastSuccessfulCommunicationAt = 0;
 
 struct LatestMessage {
   String id;
@@ -194,6 +201,7 @@ void renderScreen();
 void handleTap(int x, int y);
 bool sendLikeFeedback();
 bool sendDrawingFeedback();
+bool sendHealthReport();
 
 // ---------------------------------------------------------------------------
 // Screen helpers
@@ -602,6 +610,43 @@ bool sendDrawingFeedback() {
   return httpCode == 200;
 }
 
+bool sendHealthReport() {
+  if (WiFi.status() != WL_CONNECTED) return false;
+
+  JsonDocument doc;
+  doc["deviceId"] = DEVICE_ID;
+  doc["firmwareVersion"] = FIRMWARE_VERSION;
+  doc["uptimeMs"] = millis();
+  doc["wifiRssi"] = WiFi.RSSI();
+  doc["freeHeap"] = ESP.getFreeHeap();
+  doc["psramTotal"] = ESP.getPsramSize();
+  doc["psramFree"] = ESP.getFreePsram();
+  doc["ffatMounted"] = imageStorageReady;
+  doc["ffatTotal"] = imageStorageReady ? FFat.totalBytes() : 0;
+  doc["ffatUsed"] = imageStorageReady ? FFat.usedBytes() : 0;
+  doc["resetReason"] = static_cast<int>(esp_reset_reason());
+  doc["lastSuccessfulCommunicationMs"] = lastSuccessfulCommunicationAt;
+  doc["lastMessageId"] = lastProcessedId;
+  doc["displayReady"] = displayReady;
+  doc["touchReady"] = touchReady;
+  doc["audioReady"] = false;
+  doc["servoReady"] = servoReady;
+
+  String payload;
+  serializeJson(doc, payload);
+
+  String url = String(API_HOST) + "/.netlify/functions/lovebox-health?deviceId=" + DEVICE_ID;
+  http.begin(secureClient, url);
+  http.addHeader("X-Device-Key", DEVICE_KEY);
+  http.addHeader("Content-Type", "application/json");
+  http.setTimeout(HTTP_TIMEOUT_MS);
+  int httpCode = http.POST(payload);
+  http.end();
+
+  Serial.printf("health HTTP %d, firmware=%s\n", httpCode, FIRMWARE_VERSION);
+  return httpCode == 200;
+}
+
 // ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
@@ -613,6 +658,7 @@ void setup() {
 
   // TFT setup
   tft.begin();
+  displayReady = true;
   tft.setRotation(1);
   Serial.println("TFT initialized");
   tft.fillScreen(ILI9341_BLACK);
@@ -624,7 +670,7 @@ void setup() {
 
   // Servo setup
   heartServo.setPeriodHertz(50);
-  heartServo.attach(SERVO_PIN, 500, 2400);
+  servoReady = heartServo.attach(SERVO_PIN, 500, 2400) > 0;
   heartServo.write(SERVO_BASE_ANGLE);
 
   showScreen(
@@ -763,6 +809,11 @@ void loop() {
     }
   }
 
+  if (millis() - lastHealthAt >= HEALTH_INTERVAL_MS) {
+    lastHealthAt = millis();
+    sendHealthReport();
+  }
+
   delay(10);
 }
 
@@ -784,6 +835,8 @@ LatestMessage fetchLatestMessage() {
     http.end();
     return msg;
   }
+
+  lastSuccessfulCommunicationAt = millis();
 
   String payload = http.getString();
   http.end();

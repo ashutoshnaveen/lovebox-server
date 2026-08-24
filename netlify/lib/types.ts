@@ -20,6 +20,27 @@ export interface LoveboxFeedback {
   createdAt: string;
 }
 
+export interface LoveboxHealth {
+  deviceId: string;
+  firmwareVersion: string;
+  uptimeMs: number;
+  wifiRssi: number;
+  freeHeap: number;
+  psramTotal: number;
+  psramFree: number;
+  ffatMounted: boolean;
+  ffatTotal: number;
+  ffatUsed: number;
+  resetReason: number;
+  lastSuccessfulCommunicationMs: number;
+  lastMessageId: string;
+  displayReady: boolean;
+  touchReady: boolean;
+  audioReady: boolean;
+  servoReady: boolean;
+  reportedAt: string;
+}
+
 export interface JsonResponse<T> {
   ok: boolean;
   data?: T;

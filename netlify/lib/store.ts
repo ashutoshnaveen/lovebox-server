@@ -1,5 +1,5 @@
 import { getStore } from "@netlify/blobs";
-import type { LoveboxFeedback, LoveboxMessage } from "./types.ts";
+import type { LoveboxFeedback, LoveboxHealth, LoveboxMessage } from "./types.ts";
 
 function messagesStore() {
   return getStore({ name: "lovebox-messages", consistency: "strong" });
@@ -15,6 +15,10 @@ function feedbackStore() {
 
 function feedbackImagesStore() {
   return getStore({ name: "lovebox-feedback-images", consistency: "strong" });
+}
+
+function healthStore() {
+  return getStore({ name: "lovebox-health", consistency: "strong" });
 }
 
 export async function getLatestMessage(deviceId: string): Promise<LoveboxMessage | null> {
@@ -76,4 +80,12 @@ export async function getFeedbackImage(imageId: string): Promise<Buffer | null> 
   const store = feedbackImagesStore();
   const data = await store.get(`image:${imageId}`, { type: "arrayBuffer" });
   return data ? Buffer.from(data) : null;
+}
+
+export async function saveDeviceHealth(health: LoveboxHealth): Promise<void> {
+  await healthStore().setJSON(`latest:${health.deviceId}`, health);
+}
+
+export async function getDeviceHealth(deviceId: string): Promise<LoveboxHealth | null> {
+  return (await healthStore().get(`latest:${deviceId}`, { type: "json" })) as LoveboxHealth | null;
 }
