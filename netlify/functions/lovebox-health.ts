@@ -24,8 +24,11 @@ export default async (request: Request): Promise<Response> => {
   }
 
   try {
-    const body = await request.json();
-    const health = normalizeHealth(body, deviceId);
+    const body: unknown = await request.json();
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      throw new Error("Health report must be a JSON object");
+    }
+    const health = normalizeHealth(body as Record<string, unknown>, deviceId);
     await saveDeviceHealth(health);
     return jsonResponse({ ok: true, backendVersion: BACKEND_VERSION, data: health }, 200);
   } catch (error) {

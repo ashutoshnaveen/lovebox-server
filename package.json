@@ -5,7 +5,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "rm -rf dist && mkdir -p dist && cp -r public/* dist/",
+    "build": "node scripts/build.mjs",
     "dev": "netlify dev",
     "lint": "tsc --noEmit"
   },
