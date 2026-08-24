@@ -35,6 +35,11 @@ const char* DEVICE_KEY = "32b65c99d66ee1a4093e214ce55bc786495bb1421140ae268d7f0b
 const char* API_HOST = "https://effervescent-scone-29511f.netlify.app";
 
 // ---------------- TFT pins ----------------
+#undef TFT_CS
+#undef TFT_DC
+#undef TFT_RST
+#undef TFT_MOSI
+#undef TFT_MISO
 #define TFT_CS    10
 #define TFT_DC     9
 #define TFT_RST   14
@@ -178,7 +183,14 @@ unsigned long lastPollAt = 0;
 String toastText;
 unsigned long toastUntil = 0;
 
-// Forward declarations for touch event handlers
+// Forward declarations
+void displayCaption();
+LatestMessage fetchLatestMessage();
+bool downloadAndDisplayImage(const String& imageId);
+void sendAck();
+void animateHeart();
+void moveServo(int fromAngle, int toAngle);
+void renderScreen();
 void handleTap(int x, int y);
 bool sendLikeFeedback();
 bool sendDrawingFeedback();
@@ -607,7 +619,7 @@ void setup() {
 
   // Touch setup (shared SPI pins with TFT, separate CS)
   SPI.begin(TOUCH_SCK, TOUCH_MISO, TOUCH_MOSI, TOUCH_CS);
-  touchReady = touch.begin(SPI);
+  touchReady = touch.begin();
   Serial.printf("Touch ready: %s\n", touchReady ? "yes" : "no");
 
   // Servo setup

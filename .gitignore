@@ -1,7 +1,12 @@
 node_modules/
 dist/
 .netlify/
+.pio/
+firmware/**/.pio/
 .env
 .env.local
+.devin/
+mcp-server/config.json
+mcp-server/whitelist.json
 *.log
 .DS_Store
