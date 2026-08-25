@@ -961,6 +961,14 @@ void setup() {
     showScreen("STORAGE", "Restoring image...", "");
   }
   if (!displayStoredImage()) {
+    // No cached image (fresh FFat format, corruption, or wipe).
+    // Clear the stored message ID so the current backend message is
+    // re-downloaded instead of being skipped as "already displayed".
+    if (lastProcessedId.length() > 0) {
+      Serial.println("Cached image missing; clearing stored message ID");
+      lastProcessedId = "";
+      prefs.putString("lastId", "");
+    }
     Serial.println("No cached image displayed");
     showScreen("WAITING", "Waiting for love...", "", ILI9341_PINK);
   } else {
