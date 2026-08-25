@@ -37,7 +37,7 @@
 const char* DEVICE_ID = "lovebox-001";
 const char* DEVICE_KEY = "32b65c99d66ee1a4093e214ce55bc786495bb1421140ae268d7f0b3fdbab6730";
 const char* API_HOST = "https://effervescent-scone-29511f.netlify.app";
-const char* FIRMWARE_VERSION = "1.0.0";
+const char* FIRMWARE_VERSION = "1.0.1";
 
 // ---------------- TFT pins ----------------
 #undef TFT_CS
@@ -900,6 +900,9 @@ void setup() {
     displayCaption();
     renderUI();
   }
+
+  lastHealthAt = millis();
+  sendHealthReport();
 }
 
 // ---------------------------------------------------------------------------

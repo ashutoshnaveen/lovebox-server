@@ -2,7 +2,7 @@ import { validateDeviceKey, validateSenderPasscode } from "../lib/auth";
 import { getDeviceHealth, saveDeviceHealth } from "../lib/store";
 import { sanitizeDeviceId } from "../lib/validation";
 
-const BACKEND_VERSION = "1.0.0";
+const BACKEND_VERSION = "1.0.1";
 
 export default async (request: Request): Promise<Response> => {
   const url = new URL(request.url);
