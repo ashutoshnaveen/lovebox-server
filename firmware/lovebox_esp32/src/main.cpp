@@ -37,7 +37,7 @@
 const char* DEVICE_ID = "lovebox-001";
 const char* DEVICE_KEY = "32b65c99d66ee1a4093e214ce55bc786495bb1421140ae268d7f0b3fdbab6730";
 const char* API_HOST = "https://effervescent-scone-29511f.netlify.app";
-const char* FIRMWARE_VERSION = "1.0.2";
+const char* FIRMWARE_VERSION = "1.0.3";
 
 // ---------------- TFT pins ----------------
 #undef TFT_CS
@@ -178,6 +178,22 @@ const Button clearBtn = { 85, 200, 75, 35 };
 const Button sendBtn = { 165, 200, 75, 35 };
 const Button closeBtn = { 245, 200, 70, 35 };
 
+// Color swatches shown above the toolbar when the pen is active
+struct ColorSwatch {
+  int x, y, w, h;
+  uint16_t color;
+};
+
+const int SWATCH_COUNT = 5;
+const ColorSwatch swatches[SWATCH_COUNT] = {
+  { 10, 160, 40, 28, ILI9341_WHITE },
+  { 60, 160, 40, 28, ILI9341_RED },
+  { 110, 160, 40, 28, ILI9341_YELLOW },
+  { 160, 160, 40, 28, ILI9341_GREEN },
+  { 210, 160, 40, 28, ILI9341_BLUE },
+};
+int activeColorIndex = 0;
+
 // 1-bit overlay: 320 * 240 / 8 = 9600 bytes
 uint8_t overlayBuffer[(SCREEN_WIDTH * SCREEN_HEIGHT) / 8];
 
@@ -191,6 +207,10 @@ int touchStartY = 0;
 int touchLastX = 0;
 int touchLastY = 0;
 bool touchMoved = false;
+int touchDownSamples = 0;          // Samples seen since contact began
+unsigned long touchUpAt = 0;       // Time of last release (debounce)
+const int TOUCH_SETTLE_SAMPLES = 3;          // Discard noisy first samples
+const unsigned long TOUCH_DEBOUNCE_MS = 60;  // Ignore taps right after release
 unsigned long lastPollAt = 0;
 
 String toastText;
@@ -321,6 +341,10 @@ bool isInAnyControl(int x, int y) {
   if (!toolbarVisible) {
     if (isInButton(x, y, penBtn)) return true;
   } else {
+    for (int i = 0; i < SWATCH_COUNT; i++) {
+      const ColorSwatch& s = swatches[i];
+      if (x >= s.x && x < s.x + s.w && y >= s.y && y < s.y + s.h) return true;
+    }
     if (isInButton(x, y, drawBtn)) return true;
     if (isInButton(x, y, clearBtn)) return true;
     if (isInButton(x, y, sendBtn)) return true;
@@ -342,7 +366,7 @@ void setOverlayPixel(int x, int y) {
   uint8_t bit = 1 << (idx & 7);
   if (overlayBuffer[byteIdx] & bit) return;
   overlayBuffer[byteIdx] |= bit;
-  tft.drawPixel(x, y, TFT_WHITE);
+  tft.drawPixel(x, y, swatches[activeColorIndex].color);
 }
 
 void clearOverlay() {
@@ -407,6 +431,16 @@ void renderUI() {
   if (!toolbarVisible) {
     drawButton(penBtn, ILI9341_BLUE, "PEN");
   } else {
+    // Color swatches (active one gets a white outline)
+    for (int i = 0; i < SWATCH_COUNT; i++) {
+      const ColorSwatch& s = swatches[i];
+      tft.fillRect(s.x, s.y, s.w, s.h, s.color);
+      if (i == activeColorIndex) {
+        tft.drawRect(s.x - 1, s.y - 1, s.w + 2, s.h + 2, ILI9341_WHITE);
+      } else {
+        tft.drawRect(s.x - 1, s.y - 1, s.w + 2, s.h + 2, ILI9341_BLACK);
+      }
+    }
     tft.fillRect(0, TOOLBAR_Y, SCREEN_WIDTH, TOOLBAR_H, ILI9341_BLACK);
     drawButton(drawBtn, drawModeActive ? ILI9341_GREEN : ILI9341_BLUE, "DRAW");
     drawButton(clearBtn, ILI9341_YELLOW, "CLR");
@@ -463,19 +497,38 @@ void clearToast() {
 void handleTouch() {
   if (!touchReady) return;
 
-  TS_Point p = touch.getPoint();
+  // Poll touched() FIRST: it triggers a fresh XPT2046 read.
+  // Calling getPoint() first returns stale coordinates from the previous touch.
   bool isTouched = touch.touched();
+  TS_Point p = touch.getPoint();
 
   if (!wasTouched && isTouched) {
-    touchStartX = mapTouchToScreenX(p.x);
-    touchStartY = mapTouchToScreenY(p.y);
-    touchLastX = touchStartX;
-    touchLastY = touchStartY;
+    if (touchUpAt != 0 && millis() - touchUpAt < TOUCH_DEBOUNCE_MS) {
+      return;  // Bounce right after release: ignore
+    }
+    // Contact just began: record sample count, don't trust coordinates yet.
+    touchDownSamples = 0;
     touchMoved = false;
-    Serial.printf("touch down: raw=%d,%d screen=%d,%d z=%d\n", p.x, p.y, touchStartX, touchStartY, p.z);
-  } else if (wasTouched && isTouched) {
+    wasTouched = true;
+    return;
+  }
+
+  if (wasTouched && isTouched) {
+    touchDownSamples++;
+    if (touchDownSamples < TOUCH_SETTLE_SAMPLES) {
+      return;  // Discard noisy early samples while pressure stabilizes
+    }
     int x = mapTouchToScreenX(p.x);
     int y = mapTouchToScreenY(p.y);
+    if (touchDownSamples == TOUCH_SETTLE_SAMPLES) {
+      // First stable sample: anchor the gesture here
+      touchStartX = x;
+      touchStartY = y;
+      touchLastX = x;
+      touchLastY = y;
+      Serial.printf("touch down: raw=%d,%d screen=%d,%d z=%d\n", p.x, p.y, x, y, p.z);
+      return;
+    }
     if (abs(x - touchStartX) > 5 || abs(y - touchStartY) > 5) touchMoved = true;
 
     if (drawModeActive && !isInAnyControl(x, y)) {
@@ -483,13 +536,17 @@ void handleTouch() {
     }
     touchLastX = x;
     touchLastY = y;
-  } else if (wasTouched && !isTouched) {
+    return;
+  }
+
+  if (wasTouched && !isTouched) {
+    wasTouched = false;
+    touchUpAt = millis();
     Serial.printf("touch up: screen=%d,%d moved=%s\n", touchStartX, touchStartY, touchMoved ? "yes" : "no");
-    if (!touchMoved) {
+    if (!touchMoved && touchDownSamples >= TOUCH_SETTLE_SAMPLES) {
       handleTap(touchStartX, touchStartY);
     }
   }
-  wasTouched = isTouched;
 }
 
 void handleTap(int x, int y) {
@@ -505,6 +562,16 @@ void handleTap(int x, int y) {
   }
 
   if (toolbarVisible) {
+    // Color swatch selection
+    for (int i = 0; i < SWATCH_COUNT; i++) {
+      const ColorSwatch& s = swatches[i];
+      if (x >= s.x && x < s.x + s.w && y >= s.y && y < s.y + s.h) {
+        activeColorIndex = i;
+        Serial.printf("tap: color %d\n", i);
+        renderUI();
+        return;
+      }
+    }
     if (isInButton(x, y, drawBtn)) {
       Serial.println("tap: draw");
       flashButton(drawBtn);
@@ -794,9 +861,11 @@ void setup() {
   Serial.println("TFT initialized");
   tft.fillScreen(ILI9341_BLACK);
 
-  // Touch setup (shared SPI pins with TFT, separate CS)
-  touchReady = touch.begin();
+  // Touch setup (shared SPI bus with TFT, separate CS).
+  // Order matters: configure custom pins first, then touch.begin() attaches
+  // its interrupt; the library's internal SPI.begin() keeps existing pin mux.
   SPI.begin(TOUCH_SCK, TOUCH_MISO, TOUCH_MOSI, TOUCH_CS);
+  touchReady = touch.begin();
   Serial.printf("Touch ready: %s\n", touchReady ? "yes" : "no");
 
   // Servo setup
