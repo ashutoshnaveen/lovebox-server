@@ -10,3 +10,6 @@ mcp-server/config.json
 mcp-server/whitelist.json
 *.log
 .DS_Store
+
+upload_log.txt
+monitor_log.txt
