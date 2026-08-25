@@ -1,7 +1,7 @@
 import { validateDeviceKey } from "../lib/auth";
 import { sanitizeDeviceId } from "../lib/validation";
 
-const BACKEND_VERSION = "1.0.1";
+const BACKEND_VERSION = "1.0.2";
 
 export default async (request: Request): Promise<Response> => {
   if (request.method !== "GET") {

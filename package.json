@@ -1,6 +1,6 @@
 {
   "name": "lovebox-server",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Lovebox IoT backend and PWA sender page",
   "private": true,
   "type": "module",

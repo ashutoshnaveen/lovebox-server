@@ -37,7 +37,7 @@
 const char* DEVICE_ID = "lovebox-001";
 const char* DEVICE_KEY = "32b65c99d66ee1a4093e214ce55bc786495bb1421140ae268d7f0b3fdbab6730";
 const char* API_HOST = "https://effervescent-scone-29511f.netlify.app";
-const char* FIRMWARE_VERSION = "1.0.1";
+const char* FIRMWARE_VERSION = "1.0.2";
 
 // ---------------- TFT pins ----------------
 #undef TFT_CS
@@ -795,8 +795,8 @@ void setup() {
   tft.fillScreen(ILI9341_BLACK);
 
   // Touch setup (shared SPI pins with TFT, separate CS)
-  SPI.begin(TOUCH_SCK, TOUCH_MISO, TOUCH_MOSI, TOUCH_CS);
   touchReady = touch.begin();
+  SPI.begin(TOUCH_SCK, TOUCH_MISO, TOUCH_MOSI, TOUCH_CS);
   Serial.printf("Touch ready: %s\n", touchReady ? "yes" : "no");
 
   // Servo setup
