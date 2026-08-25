@@ -173,9 +173,8 @@ const Button penBtn = { 0, 200, 60, 40 };
 
 const int TOOLBAR_Y = 195;
 const int TOOLBAR_H = 45;
-const Button drawBtn = { 5, 200, 75, 35 };
-const Button clearBtn = { 85, 200, 75, 35 };
-const Button sendBtn = { 165, 200, 75, 35 };
+const Button clearBtn = { 5, 200, 75, 35 };
+const Button sendBtn = { 90, 200, 75, 35 };
 const Button closeBtn = { 245, 200, 70, 35 };
 
 // Color swatches shown above the toolbar when the pen is active
@@ -199,6 +198,7 @@ uint8_t overlayBuffer[(SCREEN_WIDTH * SCREEN_HEIGHT) / 8];
 
 bool toolbarVisible = false;
 bool drawModeActive = false;
+bool overlayHasStrokes = false;  // True once at least one pixel is drawn
 
 bool touchReady = false;
 bool wasTouched = false;
@@ -345,9 +345,11 @@ bool isInAnyControl(int x, int y) {
       const ColorSwatch& s = swatches[i];
       if (x >= s.x && x < s.x + s.w && y >= s.y && y < s.y + s.h) return true;
     }
-    if (isInButton(x, y, drawBtn)) return true;
-    if (isInButton(x, y, clearBtn)) return true;
-    if (isInButton(x, y, sendBtn)) return true;
+    // CLR/SEND only active once something has been drawn
+    if (overlayHasStrokes) {
+      if (isInButton(x, y, clearBtn)) return true;
+      if (isInButton(x, y, sendBtn)) return true;
+    }
     if (isInButton(x, y, closeBtn)) return true;
   }
   return false;
@@ -366,11 +368,13 @@ void setOverlayPixel(int x, int y) {
   uint8_t bit = 1 << (idx & 7);
   if (overlayBuffer[byteIdx] & bit) return;
   overlayBuffer[byteIdx] |= bit;
+  overlayHasStrokes = true;
   tft.drawPixel(x, y, swatches[activeColorIndex].color);
 }
 
 void clearOverlay() {
   memset(overlayBuffer, 0, sizeof(overlayBuffer));
+  overlayHasStrokes = false;
 }
 
 void drawLine(int x0, int y0, int x1, int y1) {
@@ -393,17 +397,15 @@ void resetFeedbackState() {
   clearOverlay();
   toolbarVisible = false;
   drawModeActive = false;
-}
-
-// ---------------------------------------------------------------------------
+}// ---------------------------------------------------------------------------
 // UI rendering
 // ---------------------------------------------------------------------------
-void drawButton(const Button& btn, uint16_t color, const char* label) {
-  tft.fillRoundRect(btn.x, btn.y, btn.w, btn.h, 4, color);
-  tft.setTextColor(ILI9341_WHITE, color);
-  tft.setTextSize(1);
-  int16_t textWidth = strlen(label) * 6;
-  tft.setCursor(btn.x + (btn.w - textWidth) / 2, btn.y + (btn.h - 8) / 2);
+void drawButton(const Button& btn, uint16_t bg, uint16_t fg, const char* label) {
+  tft.fillRoundRect(btn.x, btn.y, btn.w, btn.h, 4, bg);
+  tft.setTextColor(fg, bg);
+  tft.setTextSize(2);  // Bold, clearly readable at 320x240
+  int16_t w = strlen(label) * 12;  // 6px per char * scale 2
+  tft.setCursor(btn.x + (btn.w - w) / 2, btn.y + (btn.h - 14) / 2);
   tft.print(label);
 }
 
@@ -416,20 +418,12 @@ void drawHeartButton(const Button& btn) {
   tft.fillTriangle(cx - 15, cy - 2, cx + 15, cy - 2, cx, cy + 14, ILI9341_WHITE);
 }
 
-void drawCloseButton(const Button& btn) {
-  tft.fillRoundRect(btn.x, btn.y, btn.w, btn.h, 4, ILI9341_RED);
-  int inset = 13;
-  tft.drawLine(btn.x + inset, btn.y + inset - 1, btn.x + btn.w - inset, btn.y + btn.h - inset + 1, ILI9341_WHITE);
-  tft.drawLine(btn.x + inset, btn.y + inset, btn.x + btn.w - inset, btn.y + btn.h - inset + 2, ILI9341_WHITE);
-  tft.drawLine(btn.x + btn.w - inset, btn.y + inset - 1, btn.x + inset, btn.y + btn.h - inset + 1, ILI9341_WHITE);
-  tft.drawLine(btn.x + btn.w - inset, btn.y + inset, btn.x + inset, btn.y + btn.h - inset + 2, ILI9341_WHITE);
-}
-
 void renderUI() {
   drawHeartButton(heartBtn);
 
   if (!toolbarVisible) {
-    drawButton(penBtn, ILI9341_BLUE, "PEN");
+    // Blue background -> white text
+    drawButton(penBtn, ILI9341_BLUE, ILI9341_WHITE, "PEN");
   } else {
     // Color swatches (active one gets a white outline)
     for (int i = 0; i < SWATCH_COUNT; i++) {
@@ -442,10 +436,14 @@ void renderUI() {
       }
     }
     tft.fillRect(0, TOOLBAR_Y, SCREEN_WIDTH, TOOLBAR_H, ILI9341_BLACK);
-    drawButton(drawBtn, drawModeActive ? ILI9341_GREEN : ILI9341_BLUE, "DRAW");
-    drawButton(clearBtn, ILI9341_YELLOW, "CLR");
-    drawButton(sendBtn, ILI9341_PINK, "SEND");
-    drawCloseButton(closeBtn);
+    if (overlayHasStrokes) {
+      // Dark grey background -> white text
+      drawButton(clearBtn, 0x5A69, ILI9341_WHITE, "CLR");
+      // Green background -> white text
+      drawButton(sendBtn, ILI9341_GREEN, ILI9341_WHITE, "SEND");
+    }
+    // Red background -> white text
+    drawButton(closeBtn, ILI9341_RED, ILI9341_WHITE, "CLOSE");
   }
 }
 
@@ -455,7 +453,7 @@ void renderScreen() {
   renderUI();
 }
 
-void flashButton(const Button& btn) {
+void flashRect(const Button& btn) {
   tft.drawRect(btn.x - 2, btn.y - 2, btn.w + 4, btn.h + 4, ILI9341_WHITE);
   delay(120);
   renderUI();
@@ -552,7 +550,7 @@ void handleTouch() {
 void handleTap(int x, int y) {
   if (isInButton(x, y, heartBtn)) {
     Serial.println("tap: heart");
-    flashButton(heartBtn);
+    flashRect(heartBtn);
     if (sendLikeFeedback()) {
       showToast("Liked!");
     } else {
@@ -572,26 +570,21 @@ void handleTap(int x, int y) {
         return;
       }
     }
-    if (isInButton(x, y, drawBtn)) {
-      Serial.println("tap: draw");
-      flashButton(drawBtn);
-      drawModeActive = !drawModeActive;
-      renderUI();
-    } else if (isInButton(x, y, clearBtn)) {
+    if (overlayHasStrokes && isInButton(x, y, clearBtn)) {
       Serial.println("tap: clear");
-      flashButton(clearBtn);
+      flashRect(clearBtn);
       clearOverlay();
       renderScreen();
-    } else if (isInButton(x, y, sendBtn)) {
+    } else if (overlayHasStrokes && isInButton(x, y, sendBtn)) {
       Serial.println("tap: send");
-      flashButton(sendBtn);
+      flashRect(sendBtn);
       bool ok = sendDrawingFeedback();
       resetFeedbackState();
       renderScreen();
       showToast(ok ? "Sent!" : "Send failed");
     } else if (isInButton(x, y, closeBtn)) {
       Serial.println("tap: close");
-      flashButton(closeBtn);
+      flashRect(closeBtn);
       drawModeActive = false;
       toolbarVisible = false;
       renderScreen();
@@ -599,9 +592,11 @@ void handleTap(int x, int y) {
   } else {
     if (isInButton(x, y, penBtn)) {
       Serial.println("tap: pen");
-      flashButton(penBtn);
+      flashRect(penBtn);
+      // Pen opens drawing mode directly: color bar + immediate drawing
       toolbarVisible = true;
-      renderUI();
+      drawModeActive = true;
+      renderScreen();
     }
   }
 }
