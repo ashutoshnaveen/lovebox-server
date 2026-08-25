@@ -27,6 +27,9 @@
 #include <SPI.h>
 #include <XPT2046_Touchscreen.h>
 #include <esp_system.h>
+#include <esp_ota_ops.h>
+#include <Update.h>
+#include <mbedtls/sha256.h>
 
 // ---------------------------------------------------------------------------
 // User configuration
@@ -69,6 +72,8 @@ const int POLL_INTERVAL_MS = 5000;
 const int HTTP_TIMEOUT_MS = 20000;
 const int DOWNLOAD_TIMEOUT_MS = 30000;
 const unsigned long HEALTH_INTERVAL_MS = 15UL * 60UL * 1000UL;
+const unsigned long OTA_CHECK_INTERVAL_MS = 24UL * 60UL * 60UL * 1000UL;
+const size_t OTA_MAX_IMAGE_SIZE = 1310720;
 
 const int SERVO_PIN = 15;
 const int SERVO_BASE_ANGLE = 90;
@@ -146,6 +151,7 @@ bool displayReady = false;
 bool servoReady = false;
 unsigned long lastHealthAt = 0;
 unsigned long lastSuccessfulCommunicationAt = 0;
+unsigned long lastOtaCheckAt = 0;
 
 struct LatestMessage {
   String id;
@@ -202,6 +208,7 @@ void handleTap(int x, int y);
 bool sendLikeFeedback();
 bool sendDrawingFeedback();
 bool sendHealthReport();
+bool checkForFirmwareUpdate();
 
 // ---------------------------------------------------------------------------
 // Screen helpers
@@ -647,6 +654,129 @@ bool sendHealthReport() {
   return httpCode == 200;
 }
 
+int compareFirmwareVersions(const String& left, const String& right) {
+  int leftMajor = 0, leftMinor = 0, leftPatch = 0;
+  int rightMajor = 0, rightMinor = 0, rightPatch = 0;
+  if (sscanf(left.c_str(), "%d.%d.%d", &leftMajor, &leftMinor, &leftPatch) != 3 ||
+      sscanf(right.c_str(), "%d.%d.%d", &rightMajor, &rightMinor, &rightPatch) != 3) {
+    return 0;
+  }
+  if (leftMajor != rightMajor) return leftMajor > rightMajor ? 1 : -1;
+  if (leftMinor != rightMinor) return leftMinor > rightMinor ? 1 : -1;
+  if (leftPatch != rightPatch) return leftPatch > rightPatch ? 1 : -1;
+  return 0;
+}
+
+bool isSha256Hex(const String& value) {
+  if (value.length() != 64) return false;
+  for (size_t index = 0; index < value.length(); index++) {
+    if (!isxdigit(value[index])) return false;
+  }
+  return true;
+}
+
+bool checkForFirmwareUpdate() {
+  if (WiFi.status() != WL_CONNECTED) return false;
+
+  String manifestUrl = String(API_HOST) + "/.netlify/functions/lovebox-firmware?deviceId=" + DEVICE_ID;
+  http.begin(secureClient, manifestUrl);
+  http.addHeader("X-Device-Key", DEVICE_KEY);
+  http.setTimeout(HTTP_TIMEOUT_MS);
+  int httpCode = http.GET();
+  if (httpCode != 200) {
+    Serial.printf("firmware manifest HTTP %d\n", httpCode);
+    http.end();
+    return false;
+  }
+
+  String payload = http.getString();
+  http.end();
+
+  JsonDocument manifest;
+  if (deserializeJson(manifest, payload) || !manifest["ok"].as<bool>()) {
+    Serial.println("firmware manifest invalid");
+    return false;
+  }
+
+  String version = manifest["data"]["version"].as<String>();
+  String downloadUrl = manifest["data"]["url"].as<String>();
+  String expectedSha256 = manifest["data"]["sha256"].as<String>();
+  if (compareFirmwareVersions(version, FIRMWARE_VERSION) <= 0 ||
+      !downloadUrl.startsWith("https://") || !isSha256Hex(expectedSha256)) {
+    Serial.printf("no valid firmware update: version=%s\n", version.c_str());
+    return false;
+  }
+
+  Serial.printf("firmware update available: %s -> %s\n", FIRMWARE_VERSION, version.c_str());
+  http.begin(secureClient, downloadUrl);
+  http.addHeader("X-Device-Key", DEVICE_KEY);
+  http.setTimeout(DOWNLOAD_TIMEOUT_MS);
+  http.useHTTP10(false);
+  httpCode = http.GET();
+  int contentLength = http.getSize();
+  if (httpCode != 200 || contentLength <= 0 || static_cast<size_t>(contentLength) > OTA_MAX_IMAGE_SIZE) {
+    Serial.printf("firmware download rejected: HTTP %d, size=%d\n", httpCode, contentLength);
+    http.end();
+    return false;
+  }
+
+  if (!Update.begin(contentLength)) {
+    Serial.printf("OTA begin failed: %s\n", Update.errorString());
+    http.end();
+    return false;
+  }
+
+  mbedtls_sha256_context sha256;
+  mbedtls_sha256_init(&sha256);
+  mbedtls_sha256_starts(&sha256, 0);
+  WiFiClient* stream = http.getStreamPtr();
+  uint8_t buffer[1024];
+  size_t received = 0;
+  bool writeOk = true;
+  while (received < static_cast<size_t>(contentLength)) {
+    size_t available = stream->available();
+    if (available == 0) {
+      delay(1);
+      continue;
+    }
+    size_t requested = min(available, sizeof(buffer));
+    int bytesRead = stream->readBytes(buffer, requested);
+    if (bytesRead <= 0 || Update.write(buffer, bytesRead) != static_cast<size_t>(bytesRead)) {
+      writeOk = false;
+      break;
+    }
+    mbedtls_sha256_update(&sha256, buffer, bytesRead);
+    received += bytesRead;
+  }
+
+  unsigned char digest[32];
+  mbedtls_sha256_finish(&sha256, digest);
+  mbedtls_sha256_free(&sha256);
+  http.end();
+
+  String actualSha256;
+  char hex[3];
+  for (size_t index = 0; index < sizeof(digest); index++) {
+    snprintf(hex, sizeof(hex), "%02x", digest[index]);
+    actualSha256 += hex;
+  }
+
+  if (!writeOk || received != static_cast<size_t>(contentLength) || actualSha256 != expectedSha256) {
+    Serial.printf("OTA verification failed: received=%u/%d\n", received, contentLength);
+    Update.abort();
+    return false;
+  }
+  if (!Update.end(true)) {
+    Serial.printf("OTA finalize failed: %s\n", Update.errorString());
+    return false;
+  }
+
+  Serial.println("OTA installed; rebooting");
+  delay(250);
+  ESP.restart();
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
@@ -655,6 +785,7 @@ void setup() {
   delay(500);
   Serial.setDebugOutput(true);
   Serial.println("Lovebox boot");
+  esp_ota_mark_app_valid_cancel_rollback();
 
   // TFT setup
   tft.begin();
@@ -812,6 +943,11 @@ void loop() {
   if (millis() - lastHealthAt >= HEALTH_INTERVAL_MS) {
     lastHealthAt = millis();
     sendHealthReport();
+  }
+
+  if (millis() - lastOtaCheckAt >= OTA_CHECK_INTERVAL_MS) {
+    lastOtaCheckAt = millis();
+    checkForFirmwareUpdate();
   }
 
   delay(10);

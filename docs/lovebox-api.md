@@ -15,7 +15,15 @@ POST /.netlify/functions/lovebox-health?deviceId=lovebox-001
 
 Both methods require `X-Device-Key`. `POST` stores the latest device report; `GET` retrieves it.
 
-### 2. Send an image
+### 2. Firmware update manifest
+
+```
+GET /.netlify/functions/lovebox-firmware?deviceId=lovebox-001
+```
+
+This requires `X-Device-Key`. Set `FIRMWARE_VERSION_LATEST`, `FIRMWARE_BINARY_URL`, and `FIRMWARE_SHA256` in Netlify to publish an update. The device only installs a strictly newer semantic version after checking the HTTPS URL, size, and SHA-256 digest.
+
+### 3. Send an image
 
 ```
 POST /.netlify/functions/lovebox-send
