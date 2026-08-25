@@ -529,11 +529,23 @@ void handleTouch() {
     }
     if (abs(x - touchStartX) > 5 || abs(y - touchStartY) > 5) touchMoved = true;
 
-    if (drawModeActive && !isInAnyControl(x, y)) {
-      drawLine(touchLastX, touchLastY, x, y);
+    // Spike rejection: a single wild sample (shared-SPI glitch or pressure
+    // flicker) would draw a long stray line. Skip jumps that are physically
+    // impossible between two consecutive ~3ms samples.
+    if (abs(x - touchLastX) > 60 || abs(y - touchLastY) > 60) {
+      Serial.printf("touch spike rejected: %d,%d -> %d,%d\n", touchLastX, touchLastY, x, y);
+      return;
     }
-    touchLastX = x;
-    touchLastY = y;
+
+    // Light smoothing: average with previous point to reduce jitter
+    int sx = (x + touchLastX) / 2;
+    int sy = (y + touchLastY) / 2;
+
+    if (drawModeActive && !isInAnyControl(sx, sy)) {
+      drawLine(touchLastX, touchLastY, sx, sy);
+    }
+    touchLastX = sx;
+    touchLastY = sy;
     return;
   }
 
