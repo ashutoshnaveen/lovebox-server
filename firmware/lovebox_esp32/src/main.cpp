@@ -198,7 +198,8 @@ uint8_t overlayBuffer[(SCREEN_WIDTH * SCREEN_HEIGHT) / 8];
 
 bool toolbarVisible = false;
 bool drawModeActive = false;
-bool overlayHasStrokes = false;  // True once at least one pixel is drawn
+bool overlayHasStrokes = false;   // True once at least one pixel is drawn
+bool strokeButtonsShown = false;  // True after CLR/SEND have been rendered
 
 bool touchReady = false;
 bool wasTouched = false;
@@ -375,6 +376,7 @@ void setOverlayPixel(int x, int y) {
 void clearOverlay() {
   memset(overlayBuffer, 0, sizeof(overlayBuffer));
   overlayHasStrokes = false;
+  strokeButtonsShown = false;
 }
 
 void drawLine(int x0, int y0, int x1, int y1) {
@@ -397,6 +399,7 @@ void resetFeedbackState() {
   clearOverlay();
   toolbarVisible = false;
   drawModeActive = false;
+  strokeButtonsShown = false;
 }// ---------------------------------------------------------------------------
 // UI rendering
 // ---------------------------------------------------------------------------
@@ -543,6 +546,11 @@ void handleTouch() {
 
     if (drawModeActive && !isInAnyControl(sx, sy)) {
       drawLine(touchLastX, touchLastY, sx, sy);
+      // First stroke of the session: reveal CLR/SEND buttons now
+      if (overlayHasStrokes && !strokeButtonsShown) {
+        strokeButtonsShown = true;
+        renderUI();
+      }
     }
     touchLastX = sx;
     touchLastY = sy;
@@ -608,6 +616,7 @@ void handleTap(int x, int y) {
       // Pen opens drawing mode directly: color bar + immediate drawing
       toolbarVisible = true;
       drawModeActive = true;
+      strokeButtonsShown = false;
       renderScreen();
     }
   }
