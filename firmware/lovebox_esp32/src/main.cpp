@@ -477,7 +477,9 @@ void renderUI() {
 }
 
 void renderScreen() {
-  displayStoredImage();
+  if (!displayStoredImage()) {
+    tft.fillScreen(ILI9341_BLACK);
+  }
   displayCaption();
   renderUI();
 }
@@ -664,6 +666,7 @@ void handleTap(int x, int y) {
       } else {
         playNotificationTone();
       }
+      toastUntil = 0;
       renderScreen();
       return;
     }
@@ -1079,6 +1082,7 @@ void loop() {
         } else {
           playNotificationTone();
         }
+        toastUntil = 0;
         lastProcessedId = msg.id;
         currentCaption = msg.caption;
         captionVisible = true;
@@ -1366,6 +1370,7 @@ bool playAudioFile() {
       i2s_write(I2S_NUM_0, buf, (size_t)rd, &bytesWritten, portMAX_DELAY);
     }
     remaining -= rd;
+    yield();
   }
 
   f.close();
@@ -1406,6 +1411,7 @@ bool playNotificationTone() {
       stereoBuf[i * 4 + 3] = (s >> 8) & 0xFF;
     }
     i2s_write(I2S_NUM_0, stereoBuf, (size_t)count * 4, &bytesWritten, portMAX_DELAY);
+    yield();
   }
   Serial.println("notification tone finished");
   return true;

@@ -70,6 +70,13 @@ export default async (request: Request): Promise<Response> => {
         return jsonResponse({ ok: false, error: "Audio too large" }, 413);
       }
       const audioBuffer = Buffer.from(await audioFile.arrayBuffer());
+      if (
+        audioBuffer.length < 12 ||
+        audioBuffer.readUInt32LE(0) !== 0x46464952 ||
+        audioBuffer.readUInt32LE(8) !== 0x45564157
+      ) {
+        return jsonResponse({ ok: false, error: "Only WAV audio is supported. Use the record button or convert your audio to WAV before sending." }, 415);
+      }
       audioId = generateId();
       audioSize = audioBuffer.length;
       await saveAudio(audioId, audioBuffer);
