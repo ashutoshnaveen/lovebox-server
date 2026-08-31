@@ -21,3 +21,4 @@ export function generateId(): string {
 }
 
 export const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB upload limit
+export const MAX_AUDIO_SIZE = 5 * 1024 * 1024; // 5 MB upload limit

@@ -17,6 +17,10 @@ function feedbackImagesStore() {
   return getStore({ name: "lovebox-feedback-images", consistency: "strong" });
 }
 
+function audioStore() {
+  return getStore({ name: "lovebox-audio", consistency: "strong" });
+}
+
 function healthStore() {
   return getStore({ name: "lovebox-health", consistency: "strong" });
 }
@@ -38,6 +42,17 @@ export async function saveMessage(message: LoveboxMessage, imageBuffer: Buffer):
 export async function getImage(deviceId: string, imageId: string): Promise<Buffer | null> {
   const store = imagesStore();
   const data = await store.get(`image:${deviceId}:${imageId}`, { type: "arrayBuffer" });
+  return data ? Buffer.from(data) : null;
+}
+
+export async function saveAudio(audioId: string, buffer: Buffer): Promise<void> {
+  const store = audioStore();
+  await store.set(`audio:${audioId}`, buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer);
+}
+
+export async function getAudio(audioId: string): Promise<Buffer | null> {
+  const store = audioStore();
+  const data = await store.get(`audio:${audioId}`, { type: "arrayBuffer" });
   return data ? Buffer.from(data) : null;
 }
 

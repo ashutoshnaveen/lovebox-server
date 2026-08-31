@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lovebox-v2';
+const CACHE_NAME = 'lovebox-v3';
 const ASSETS = ['/', '/lovebox.css', '/lovebox.js', '/manifest.json', '/icon.svg'];
 
 self.addEventListener('install', (event) => {

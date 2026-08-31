@@ -50,6 +50,16 @@
         <div class="char-count"><span id="captionCount">0</span>/120</div>
       </div>
 
+      <div class="field">
+        <label for="audio">Voice note <span class="optional">(optional)</span></label>
+        <div class="audio-controls">
+          <button type="button" id="recordBtn" class="record-btn">Record</button>
+          <input type="file" id="audio" name="audio" accept="audio/*">
+        </div>
+        <audio id="audioPreview" class="audio-preview hidden" controls></audio>
+        <div id="audioStatus" class="audio-status hidden"></div>
+      </div>
+
       <button type="submit" id="sendBtn" class="send-btn" disabled>
         <span class="btn-text">Send to Lovebox</span>
         <span class="btn-spinner hidden">Sending...</span>

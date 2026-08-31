@@ -15,6 +15,10 @@ const feedbackEl = document.getElementById('feedback');
 const feedbackStatus = document.getElementById('feedbackStatus');
 const feedbackTimeline = document.getElementById('feedbackTimeline');
 const refreshFeedbackBtn = document.getElementById('refreshFeedback');
+const recordBtn = document.getElementById('recordBtn');
+const audioInput = document.getElementById('audio');
+const audioPreview = document.getElementById('audioPreview');
+const audioStatus = document.getElementById('audioStatus');
 const deviceHealth = document.getElementById('deviceHealth');
 const healthStatus = document.getElementById('healthStatus');
 const healthGrid = document.getElementById('healthGrid');
@@ -22,6 +26,9 @@ const refreshHealthBtn = document.getElementById('refreshHealth');
 
 let selectedFile = null;
 let feedbackSignature = null;
+let audioWavBlob = null;
+let mediaRecorder = null;
+let mediaChunks = [];
 
 passcodeInput.value = localStorage.getItem('lovebox_passcode') || '';
 document.getElementById('senderName').value = localStorage.getItem('lovebox_sender') || '';
@@ -189,6 +196,159 @@ refreshHealthBtn.addEventListener('click', checkHealth);
 startFeedbackPolling();
 startHealthPolling();
 
+function showAudioStatus(text, isError) {
+  audioStatus.textContent = text;
+  audioStatus.classList.remove('hidden', 'error');
+  if (isError) audioStatus.classList.add('error');
+}
+
+function setAudioPreview(blob) {
+  audioWavBlob = blob;
+  if (blob) {
+    audioPreview.src = URL.createObjectURL(blob);
+    audioPreview.classList.remove('hidden');
+  } else {
+    audioPreview.src = '';
+    audioPreview.classList.add('hidden');
+  }
+  updateSendButton();
+}
+
+// Decode any audio (recorded or uploaded MP3/WAV/AAC/M4A/OGG) and normalize to a loud, clear
+// 16-bit PCM WAV at 16 kHz mono so the ESP32 can stream it straight to the I2S DAC.
+async function normalizeAudioToWav(arrayBuffer) {
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  const ctx = new AudioCtx();
+  try {
+    const decoded = await decodeAudioBuffer(ctx, arrayBuffer);
+    const targetRate = 16000;
+    const offline = new OfflineAudioContext(1, Math.ceil(decoded.duration * targetRate), targetRate);
+    const src = offline.createBufferSource();
+    src.buffer = decoded;
+    src.connect(offline.destination);
+    src.start();
+    const rendered = await offline.startRendering();
+    return encodeWav(rendered.getChannelData(0), targetRate);
+  } finally {
+    ctx.close();
+  }
+}
+
+function decodeAudioBuffer(ctx, arrayBuffer) {
+  return new Promise((resolve, reject) => {
+    try {
+      const res = ctx.decodeAudioData(
+        arrayBuffer.slice(0),
+        (buf) => resolve(buf),
+        (err) => reject(err || new Error('Failed to decode audio data'))
+      );
+      if (res && typeof res.then === 'function') {
+        res.then(resolve).catch(reject);
+      }
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
+function encodeWav(samples, sampleRate) {
+  // Peak amplitude calculation for automatic gain normalization
+  let peak = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const abs = Math.abs(samples[i]);
+    if (abs > peak) peak = abs;
+  }
+  // Amplify quiet microphone audio up to full clean scale (0.95 peak)
+  const gain = peak > 0.001 ? Math.min(10.0, 0.95 / peak) : 1.0;
+
+  const bytesPerSample = 2;
+  const dataSize = samples.length * bytesPerSample;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
+  const writeString = (offset, str) => {
+    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+  };
+  writeString(0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * bytesPerSample, true);
+  view.setUint16(32, bytesPerSample, true);
+  view.setUint16(34, 16, true);
+  writeString(36, 'data');
+  view.setUint32(40, dataSize, true);
+  let offset = 44;
+  for (let i = 0; i < samples.length; i++) {
+    let s = Math.max(-1, Math.min(1, samples[i] * gain));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    offset += 2;
+  }
+  return new Blob([buffer], { type: 'audio/wav' });
+}
+
+audioInput.addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) {
+    setAudioPreview(null);
+    return;
+  }
+  showAudioStatus('Processing audio...', false);
+  try {
+    const buf = await file.arrayBuffer();
+    const wav = await normalizeAudioToWav(buf);
+    setAudioPreview(wav);
+    showAudioStatus('Voice note ready.', false);
+  } catch (err) {
+    console.error('Audio processing failed', err);
+    setAudioPreview(null);
+    showAudioStatus('Could not read that audio file.', true);
+  }
+});
+
+recordBtn.addEventListener('click', async () => {
+  if (mediaRecorder && mediaRecorder.state === 'recording') {
+    mediaRecorder.stop();
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showAudioStatus('Recording not supported on this device.', true);
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaChunks = [];
+    mediaRecorder = new MediaRecorder(stream);
+    mediaRecorder.ondataavailable = (ev) => mediaChunks.push(ev.data);
+    mediaRecorder.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      recordBtn.classList.remove('recording');
+      recordBtn.textContent = 'Record';
+      showAudioStatus('Processing recording...', false);
+      try {
+        const blob = new Blob(mediaChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+        const wav = await normalizeAudioToWav(await blob.arrayBuffer());
+        setAudioPreview(wav);
+        showAudioStatus('Voice note ready.', false);
+      } catch (err) {
+        console.error('Recording processing failed', err);
+        setAudioPreview(null);
+        showAudioStatus('Could not process recording.', true);
+      }
+    };
+    mediaRecorder.start();
+    recordBtn.classList.add('recording');
+    recordBtn.textContent = 'Stop';
+    showAudioStatus('Recording... tap Stop when done.', false);
+  } catch (err) {
+    console.error('Microphone access failed', err);
+    showAudioStatus('Microphone permission denied.', true);
+  }
+});
+
 imageInput.addEventListener('change', (e) => {
   selectedFile = e.target.files[0] || null;
   if (selectedFile) {
@@ -226,6 +386,9 @@ form.addEventListener('submit', async (e) => {
   formData.append('senderName', document.getElementById('senderName').value);
   formData.append('caption', captionInput.value);
   formData.append('image', selectedFile);
+  if (audioWavBlob) {
+    formData.append('audio', audioWavBlob, 'voice-note.wav');
+  }
 
   try {
     const response = await fetch('/.netlify/functions/lovebox-send', {
@@ -246,6 +409,9 @@ form.addEventListener('submit', async (e) => {
       previewImg.src = '';
       selectedFile = null;
       captionCount.textContent = '0';
+      setAudioPreview(null);
+      audioStatus.classList.add('hidden');
+      audioInput.value = '';
       passcodeInput.value = localStorage.getItem('lovebox_passcode') || '';
       document.getElementById('senderName').value = localStorage.getItem('lovebox_sender') || '';
     } else {

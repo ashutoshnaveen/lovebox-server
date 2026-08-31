@@ -319,6 +319,40 @@ textarea {
   background: #000;
 }
 
+.audio-controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.record-btn {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid #2a2a3a;
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.record-btn.recording {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.audio-preview {
+  width: 100%;
+  margin-top: 10px;
+}
+
+.audio-status {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
 .hidden {
   display: none !important;
 }

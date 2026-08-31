@@ -35,6 +35,7 @@ Headers:
 Body (multipart/form-data):
 - `deviceId`: e.g. `lovebox-001`
 - `image`: image file (JPEG/PNG, up to 10 MB)
+- `audio`: optional voice-note file (any browser-decodable format; the sender PWA normalizes it to a 16-bit PCM WAV at 16 kHz mono, up to 5 MB)
 - `senderName`: optional, max 60 chars
 - `caption`: optional, max 120 chars
 
@@ -49,6 +50,8 @@ Response:
     "caption": "Miss you!",
     "imageId": "image-id",
     "imageSize": 153600,
+    "audioId": "audio-id",
+    "audioSize": 24576,
     "createdAt": "2026-07-17T..."
   }
 }
@@ -74,6 +77,8 @@ Response:
     "caption": "Miss you!",
     "imageId": "image-id",
     "imageSize": 153600,
+    "audioId": "audio-id",
+    "audioSize": 24576,
     "createdAt": "2026-07-17T...",
     "acknowledgedAt": null
   }
@@ -94,6 +99,17 @@ Headers:
 Response: raw RGB565 binary, 153,600 bytes (320×240 × 2 bytes).
 
 Pixel format: little-endian uint16 RGB565, row-major, top-to-bottom.
+
+### 4b. Download voice-note audio
+
+```
+GET /.netlify/functions/lovebox-audio?deviceId=lovebox-001&audioId=<audioId>
+```
+
+Headers:
+- `X-Device-Key`: per-device secret
+
+Response: raw audio bytes. The sender PWA stores normalized 16-bit PCM WAV (16 kHz, mono), which the ESP32 streams straight to its I2S DAC. If no audio is attached to the message, `audioId` is absent and this endpoint is not called.
 
 ### 5. Acknowledge delivery
 
@@ -125,7 +141,8 @@ curl -X POST \
   -F "deviceId=lovebox-001" \
   -F "senderName=Ashutosh" \
   -F "caption=Miss you!" \
-  -F "image=@photo.jpg"
+  -F "image=@photo.jpg" \
+  -F "audio=@voice-note.wav"
 ```
 
 Get latest metadata:

@@ -30,6 +30,8 @@
 #include <esp_ota_ops.h>
 #include <Update.h>
 #include <mbedtls/sha256.h>
+#include <driver/i2s.h>
+#include <string.h>
 
 // ---------------------------------------------------------------------------
 // User configuration
@@ -81,10 +83,17 @@ const int SERVO_LEFT_ANGLE = 45;
 const int SERVO_RIGHT_ANGLE = 135;
 const int SERVO_STEP_DELAY_MS = 20;
 
+// ---------------- I2S Audio pins (MAX98357A) ----------------
+#define I2S_LRC_PIN   4   // LRCLK / WS
+#define I2S_BCLK_PIN  5   // BCLK / SCK
+#define I2S_DIN_PIN   6   // DIN / SD
+// GAIN and SD pins left unconnected (default gain, always enabled)
+
 const int SCREEN_WIDTH = 320;
 const int SCREEN_HEIGHT = 240;
 const int IMAGE_SIZE = SCREEN_WIDTH * SCREEN_HEIGHT * 2; // RGB565, 2 bytes per pixel
 const char* IMAGE_PATH = "/latest.rgb565";
+const char* AUDIO_PATH = "/audio.wav";
 
 class LoveboxDisplay : public lgfx::LGFX_Device {
   lgfx::Panel_ILI9341 panel;
@@ -149,6 +158,7 @@ String currentCaption;
 bool imageStorageReady = false;
 bool displayReady = false;
 bool servoReady = false;
+bool audioReady = false;
 unsigned long lastHealthAt = 0;
 unsigned long lastSuccessfulCommunicationAt = 0;
 unsigned long lastOtaCheckAt = 0;
@@ -156,6 +166,7 @@ unsigned long lastOtaCheckAt = 0;
 struct LatestMessage {
   String id;
   String imageId;
+  String audioId;
   String caption;
   String senderName;
   bool valid;
@@ -168,8 +179,10 @@ struct Button {
   int x, y, w, h;
 };
 
-const Button heartBtn = { 250, 0, 70, 40 };
-const Button penBtn = { 0, 200, 60, 40 };
+const Button heartBtn  = { 250, 0, 70, 40 };
+const Button capBtn    = { 0, 0, 65, 36 };
+const Button penBtn    = { 0, 200, 60, 40 };
+const Button replayBtn = { 245, 200, 75, 40 };
 
 const int TOOLBAR_Y = 195;
 const int TOOLBAR_H = 45;
@@ -196,6 +209,7 @@ int activeColorIndex = 0;
 // 1-bit overlay: 320 * 240 / 8 = 9600 bytes
 uint8_t overlayBuffer[(SCREEN_WIDTH * SCREEN_HEIGHT) / 8];
 
+bool captionVisible = true;
 bool toolbarVisible = false;
 bool drawModeActive = false;
 bool overlayHasStrokes = false;   // True once at least one pixel is drawn
@@ -224,12 +238,16 @@ bool downloadAndDisplayImage(const String& imageId);
 void sendAck();
 void animateHeart();
 void moveServo(int fromAngle, int toAngle);
+bool downloadAudioFile(const String& audioId);
+bool playAudioFile();
+bool playNotificationTone();
 void renderScreen();
 void handleTap(int x, int y);
 bool sendLikeFeedback();
 bool sendDrawingFeedback();
 bool sendHealthReport();
 bool checkForFirmwareUpdate();
+bool initI2SAudio();
 
 // ---------------------------------------------------------------------------
 // Screen helpers
@@ -339,8 +357,10 @@ bool isInButton(int x, int y, const Button& btn) {
 
 bool isInAnyControl(int x, int y) {
   if (isInButton(x, y, heartBtn)) return true;
+  if (currentCaption.length() > 0 && isInButton(x, y, capBtn)) return true;
   if (!toolbarVisible) {
     if (isInButton(x, y, penBtn)) return true;
+    if (isInButton(x, y, replayBtn)) return true;
   } else {
     for (int i = 0; i < SWATCH_COUNT; i++) {
       const ColorSwatch& s = swatches[i];
@@ -424,9 +444,15 @@ void drawHeartButton(const Button& btn) {
 void renderUI() {
   drawHeartButton(heartBtn);
 
+  if (currentCaption.length() > 0) {
+    drawButton(capBtn, captionVisible ? 0x2104 : 0x5A69, ILI9341_WHITE, "CAP");
+  }
+
   if (!toolbarVisible) {
     // Blue background -> white text
     drawButton(penBtn, ILI9341_BLUE, ILI9341_WHITE, "PEN");
+    // Purple/Magenta background -> white text
+    drawButton(replayBtn, 0x780F, ILI9341_WHITE, "PLAY");
   } else {
     // Color swatches (active one gets a white outline)
     for (int i = 0; i < SWATCH_COUNT; i++) {
@@ -463,7 +489,7 @@ void flashRect(const Button& btn) {
 }
 
 void displayCaption() {
-  if (currentCaption.length() == 0) return;
+  if (!captionVisible || currentCaption.length() == 0) return;
   const int capY = 42;
   const int capH = 22;
   tft.fillRect(0, capY, SCREEN_WIDTH, capH, ILI9341_BLACK);
@@ -579,6 +605,15 @@ void handleTap(int x, int y) {
     return;
   }
 
+  if (currentCaption.length() > 0 && isInButton(x, y, capBtn)) {
+    Serial.println("tap: caption toggle");
+    flashRect(capBtn);
+    captionVisible = !captionVisible;
+    renderScreen();
+    showToast(captionVisible ? "Caption ON" : "Caption OFF");
+    return;
+  }
+
   if (toolbarVisible) {
     // Color swatch selection
     for (int i = 0; i < SWATCH_COUNT; i++) {
@@ -618,6 +653,19 @@ void handleTap(int x, int y) {
       drawModeActive = true;
       strokeButtonsShown = false;
       renderScreen();
+      return;
+    }
+    if (isInButton(x, y, replayBtn)) {
+      Serial.println("tap: replay");
+      flashRect(replayBtn);
+      showToast("Playing...");
+      if (FFat.exists(AUDIO_PATH)) {
+        playAudioFile();
+      } else {
+        playNotificationTone();
+      }
+      renderScreen();
+      return;
     }
   }
 }
@@ -719,7 +767,7 @@ bool sendHealthReport() {
   doc["lastMessageId"] = lastProcessedId;
   doc["displayReady"] = displayReady;
   doc["touchReady"] = touchReady;
-  doc["audioReady"] = false;
+  doc["audioReady"] = audioReady;
   doc["servoReady"] = servoReady;
 
   String payload;
@@ -889,6 +937,10 @@ void setup() {
   servoReady = heartServo.attach(SERVO_PIN, 500, 2400) > 0;
   heartServo.write(SERVO_BASE_ANGLE);
 
+  // I2S Audio setup (MAX98357A)
+  audioReady = initI2SAudio();
+  Serial.printf("Audio ready: %s\n", audioReady ? "yes" : "no");
+
   showScreen(
     "LOVEBOX",
     "Starting...",
@@ -1020,13 +1072,20 @@ void loop() {
     if (msg.valid && msg.id != lastProcessedId) {
       if (downloadAndDisplayImage(msg.imageId)) {
         animateHeart();
+        if (msg.audioId.length() > 0) {
+          if (downloadAudioFile(msg.audioId)) {
+            playAudioFile();
+          }
+        } else {
+          playNotificationTone();
+        }
         lastProcessedId = msg.id;
         currentCaption = msg.caption;
+        captionVisible = true;
         prefs.putString("lastId", lastProcessedId);
         prefs.putString("lastCaption", currentCaption);
         resetFeedbackState();
-        displayCaption();
-        renderUI();
+        renderScreen();
         sendAck();
       } else {
         showScreen("OOPS", "Image failed", lastImageError, ILI9341_RED);
@@ -1049,11 +1108,8 @@ void loop() {
   delay(10);
 }
 
-// ---------------------------------------------------------------------------
-// Network: fetch latest metadata
-// ---------------------------------------------------------------------------
 LatestMessage fetchLatestMessage() {
-  LatestMessage msg = { "", "", "", "", false };
+  LatestMessage msg = { "", "", "", "", "", false };
 
   String url = String(API_HOST) + "/.netlify/functions/lovebox-latest?deviceId=" + DEVICE_ID;
 
@@ -1089,9 +1145,9 @@ LatestMessage fetchLatestMessage() {
   if (data.isNull()) {
     return msg; // No image yet
   }
-
   msg.id = data["id"].as<String>();
   msg.imageId = data["imageId"].as<String>();
+  msg.audioId = data["audioId"].as<String>();
   msg.caption = data["caption"].as<String>();
   msg.senderName = data["senderName"].as<String>();
   msg.valid = msg.id.length() > 0 && msg.imageId.length() > 0;
@@ -1172,6 +1228,190 @@ void sendAck() {
 }
 
 // ---------------------------------------------------------------------------
+// Network: download and play voice-note audio (16-bit PCM WAV)
+// ---------------------------------------------------------------------------
+bool downloadAudioFile(const String& audioId) {
+  if (!imageStorageReady || WiFi.status() != WL_CONNECTED) return false;
+
+  String url = String(API_HOST) + "/.netlify/functions/lovebox-audio?deviceId=" + DEVICE_ID + "&audioId=" + audioId;
+  http.useHTTP10(false);
+  http.begin(secureClient, url);
+  http.addHeader("X-Device-Key", DEVICE_KEY);
+  http.setTimeout(DOWNLOAD_TIMEOUT_MS);
+
+  int httpCode = http.GET();
+  if (httpCode != 200) {
+    Serial.printf("audio HTTP %d\n", httpCode);
+    http.end();
+    return false;
+  }
+
+  showToast("Voice note...");
+
+  if (FFat.exists(AUDIO_PATH)) FFat.remove(AUDIO_PATH);
+  File audioFile = FFat.open(AUDIO_PATH, FILE_WRITE);
+  if (!audioFile) {
+    http.end();
+    return false;
+  }
+
+  int written = http.writeToStream(&audioFile);
+  audioFile.close();
+  http.end();
+
+  Serial.printf("audio downloaded: %d bytes\n", written);
+  return written > 44;
+}
+
+bool playAudioFile() {
+  File f = FFat.open(AUDIO_PATH, FILE_READ);
+  if (!f) return false;
+
+  uint8_t hdr[12];
+  if (f.read(hdr, 12) != 12 || strncmp((char*)hdr, "RIFF", 4) != 0) {
+    f.close();
+    return false;
+  }
+
+  uint32_t sampleRate = 16000;
+  uint16_t channels = 1;
+  uint16_t bits = 16;
+  bool foundData = false;
+  uint32_t dataSize = 0;
+
+  while (f.available()) {
+    uint8_t chunkId[4];
+    uint8_t chunkSizeBytes[4];
+    if (f.read(chunkId, 4) != 4) break;
+    if (f.read(chunkSizeBytes, 4) != 4) break;
+    uint32_t chunkSize = chunkSizeBytes[0] | (chunkSizeBytes[1] << 8) |
+                         ((uint32_t)chunkSizeBytes[2] << 16) | ((uint32_t)chunkSizeBytes[3] << 24);
+
+    if (memcmp(chunkId, "fmt ", 4) == 0) {
+      uint8_t fmt[16];
+      if (f.read(fmt, 16) == 16) {
+        channels = fmt[2] | (fmt[3] << 8);
+        sampleRate = fmt[4] | (fmt[5] << 8) | ((uint32_t)fmt[6] << 16) | ((uint32_t)fmt[7] << 24);
+        bits = fmt[14] | (fmt[15] << 8);
+      }
+      int32_t skip = (int32_t)chunkSize - 16;
+      while (skip > 0) {
+        uint8_t dump[32];
+        int n = f.read(dump, skip > 32 ? 32 : skip);
+        if (n <= 0) break;
+        skip -= n;
+      }
+    } else if (memcmp(chunkId, "data", 4) == 0) {
+      dataSize = chunkSize;
+      foundData = true;
+      break;
+    } else {
+      int32_t skip = (int32_t)chunkSize;
+      while (skip > 0) {
+        uint8_t dump[32];
+        int n = f.read(dump, skip > 32 ? 32 : skip);
+        if (n <= 0) break;
+        skip -= n;
+      }
+    }
+  }
+
+  if (!foundData || dataSize == 0) {
+    f.close();
+    return false;
+  }
+
+  i2s_set_clk(I2S_NUM_0, sampleRate, (i2s_bits_per_sample_t)bits, I2S_CHANNEL_STEREO);
+
+  const int CHUNK = 1024;
+  uint8_t buf[CHUNK];
+  static uint8_t stereoBuf[CHUNK * 2];
+  uint32_t remaining = dataSize;
+  bool mono = (channels == 1);
+  size_t bytesWritten = 0;
+  const float DIGITAL_GAIN = 1.6f;
+
+  while (remaining > 0) {
+    uint32_t toRead = remaining > CHUNK ? CHUNK : remaining;
+    int rd = f.read(buf, toRead);
+    if (rd <= 0) break;
+
+    if (mono && bits == 16) {
+      int samples = rd / 2;
+      for (int i = 0; i < samples; i++) {
+        int16_t raw = (int16_t)(buf[i * 2] | (buf[i * 2 + 1] << 8));
+        int32_t amplified = (int32_t)(raw * DIGITAL_GAIN);
+        if (amplified > 32767) amplified = 32767;
+        if (amplified < -32768) amplified = -32768;
+        uint16_t s = (uint16_t)(int16_t)amplified;
+        stereoBuf[i * 4]     = s & 0xFF;
+        stereoBuf[i * 4 + 1] = (s >> 8) & 0xFF;
+        stereoBuf[i * 4 + 2] = s & 0xFF;
+        stereoBuf[i * 4 + 3] = (s >> 8) & 0xFF;
+      }
+      i2s_write(I2S_NUM_0, stereoBuf, (size_t)samples * 4, &bytesWritten, portMAX_DELAY);
+    } else {
+      if (bits == 16) {
+        int samples = rd / 2;
+        for (int i = 0; i < samples; i++) {
+          int16_t raw = (int16_t)(buf[i * 2] | (buf[i * 2 + 1] << 8));
+          int32_t amplified = (int32_t)(raw * DIGITAL_GAIN);
+          if (amplified > 32767) amplified = 32767;
+          if (amplified < -32768) amplified = -32768;
+          uint16_t s = (uint16_t)(int16_t)amplified;
+          buf[i * 2]     = s & 0xFF;
+          buf[i * 2 + 1] = (s >> 8) & 0xFF;
+        }
+      }
+      i2s_write(I2S_NUM_0, buf, (size_t)rd, &bytesWritten, portMAX_DELAY);
+    }
+    remaining -= rd;
+  }
+
+  f.close();
+  Serial.println("audio playback finished");
+  return true;
+}
+
+bool playNotificationTone() {
+  const uint32_t sampleRate = 16000;
+  i2s_set_clk(I2S_NUM_0, sampleRate, I2S_BITS_PER_SAMPLE_16BIT, I2S_CHANNEL_STEREO);
+
+  // 4 notes (C5 523Hz, E5 659Hz, G5 784Hz, C6 1046Hz) with smooth decay
+  const float frequencies[4] = { 523.25f, 659.25f, 783.99f, 1046.50f };
+  const int totalSamples = sampleRate * 0.95f;
+
+  const int CHUNK = 256;
+  uint8_t stereoBuf[CHUNK * 4];
+  size_t bytesWritten = 0;
+
+  for (int sampleIdx = 0; sampleIdx < totalSamples; sampleIdx += CHUNK) {
+    int count = min(CHUNK, totalSamples - sampleIdx);
+    for (int i = 0; i < count; i++) {
+      int curSample = sampleIdx + i;
+      float val = 0.0f;
+      for (int n = 0; n < 4; n++) {
+        int noteStart = n * (sampleRate * 0.14f);
+        if (curSample >= noteStart) {
+          float t = (float)(curSample - noteStart) / (float)sampleRate;
+          float env = expf(-4.5f * t);
+          val += 0.45f * sinf(2.0f * 3.14159265f * frequencies[n] * t) * env;
+        }
+      }
+      val = constrain(val, -0.98f, 0.98f);
+      int16_t s = (int16_t)(val * 32000.0f);
+      stereoBuf[i * 4]     = s & 0xFF;
+      stereoBuf[i * 4 + 1] = (s >> 8) & 0xFF;
+      stereoBuf[i * 4 + 2] = s & 0xFF;
+      stereoBuf[i * 4 + 3] = (s >> 8) & 0xFF;
+    }
+    i2s_write(I2S_NUM_0, stereoBuf, (size_t)count * 4, &bytesWritten, portMAX_DELAY);
+  }
+  Serial.println("notification tone finished");
+  return true;
+}
+
+// ---------------------------------------------------------------------------
 // Servo animation
 // ---------------------------------------------------------------------------
 void animateHeart() {
@@ -1188,4 +1428,47 @@ void moveServo(int fromAngle, int toAngle) {
     delay(SERVO_STEP_DELAY_MS);
   }
   heartServo.write(toAngle);
+}
+
+// ---------------------------------------------------------------------------
+// I2S Audio initialization (MAX98357A)
+// ---------------------------------------------------------------------------
+bool initI2SAudio() {
+  // Configure I2S for MAX98357A (I2S Philips standard, 16-bit, stereo)
+  i2s_config_t i2s_config = {
+    .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX),
+    .sample_rate = 44100,
+    .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
+    .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
+    .communication_format = I2S_COMM_FORMAT_STAND_I2S,
+    .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
+    .dma_buf_count = 8,
+    .dma_buf_len = 64,
+    .use_apll = false,
+    .tx_desc_auto_clear = true,
+    .fixed_mclk = 0
+  };
+
+  i2s_pin_config_t pin_config = {
+    .bck_io_num = I2S_BCLK_PIN,
+    .ws_io_num = I2S_LRC_PIN,
+    .data_out_num = I2S_DIN_PIN,
+    .data_in_num = I2S_PIN_NO_CHANGE
+  };
+
+  esp_err_t err = i2s_driver_install(I2S_NUM_0, &i2s_config, 0, NULL);
+  if (err != ESP_OK) {
+    Serial.printf("I2S driver install failed: %s\n", esp_err_to_name(err));
+    return false;
+  }
+
+  err = i2s_set_pin(I2S_NUM_0, &pin_config);
+  if (err != ESP_OK) {
+    Serial.printf("I2S set pin failed: %s\n", esp_err_to_name(err));
+    i2s_driver_uninstall(I2S_NUM_0);
+    return false;
+  }
+
+  Serial.println("I2S (MAX98357A) initialized on GPIO 4(LRC), 5(BCLK), 6(DIN)");
+  return true;
 }

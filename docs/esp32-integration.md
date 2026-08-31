@@ -60,6 +60,25 @@ Set `TFT_MISO` even if you do not read from the display; it keeps the SPI bus de
 | TFT/Servo GND | GND |
 | TFT VCC | 3V3 |
 | Servo power | 5V (external regulated supply recommended for final build) |
+| I2S LRC/WS | GPIO 4 |
+| I2S BCLK/SCK | GPIO 5 |
+| I2S DIN/SD | GPIO 6 |
+| MAX98357A GAIN | unconnected (default gain) |
+| MAX98357A SD | unconnected (always enabled) |
+| MAX98357A GND | GND |
+| MAX98357A VIN | 5V |
+| Speaker − | black terminal |
+| Speaker + | red terminal |
+
+## Voice-note audio
+
+Messages may include an optional voice note. The sender PWA normalizes any recorded/chosen audio into a **16-bit PCM WAV (16 kHz, mono)** and the backend stores the raw bytes. When a new image arrives, the firmware:
+
+1. downloads `/.netlify/functions/lovebox-audio?deviceId=...&audioId=...` to `/audio.wav` on FFat,
+2. parses the WAV header (supports `fmt ` + `data` chunks; re-clocks I2S to the file's sample rate),
+3. streams the PCM to the MAX98357A over I2S, duplicating mono samples to the stereo bus.
+
+No audio decoder is required on the device — the PCM is written straight to the I2S peripheral. If a message has no `audioId`, playback is skipped.
 
 ## Configure the firmware
 

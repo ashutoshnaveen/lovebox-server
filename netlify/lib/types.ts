@@ -5,6 +5,8 @@ export interface LoveboxMessage {
   caption: string;
   imageId: string;
   imageSize: number;
+  audioId?: string;
+  audioSize?: number;
   createdAt: string;
   acknowledgedAt?: string;
 }

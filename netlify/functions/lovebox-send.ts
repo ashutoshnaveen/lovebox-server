@@ -6,12 +6,24 @@ import {
   sanitizeDeviceId,
   sanitizeSenderName,
   MAX_IMAGE_SIZE,
+  MAX_AUDIO_SIZE,
 } from "../lib/validation";
-import { saveMessage } from "../lib/store";
+import { saveMessage, saveAudio } from "../lib/store";
 import type { LoveboxMessage } from "../lib/types";
 
 const DISPLAY_WIDTH = 320;
 const DISPLAY_HEIGHT = 240;
+
+function isUploadFile(val: unknown): val is { arrayBuffer: () => Promise<ArrayBuffer>; size: number } {
+  return (
+    val !== null &&
+    typeof val === "object" &&
+    "arrayBuffer" in val &&
+    typeof (val as { arrayBuffer: unknown }).arrayBuffer === "function" &&
+    "size" in val &&
+    typeof (val as { size: unknown }).size === "number"
+  );
+}
 
 export default async (request: Request): Promise<Response> => {
   if (request.method !== "POST") {
@@ -35,7 +47,7 @@ export default async (request: Request): Promise<Response> => {
       return jsonResponse({ ok: false, error: "Invalid or missing deviceId" }, 400);
     }
 
-    if (!imageFile || !(imageFile instanceof File) || imageFile.size === 0) {
+    if (!isUploadFile(imageFile) || imageFile.size === 0) {
       return jsonResponse({ ok: false, error: "Image is required" }, 400);
     }
 
@@ -50,6 +62,19 @@ export default async (request: Request): Promise<Response> => {
     const rgb565 = convertToRgb565(image.bitmap);
     const imageId = generateId();
 
+    let audioId: string | undefined;
+    let audioSize: number | undefined;
+    const audioFile = formData.get("audio");
+    if (isUploadFile(audioFile) && audioFile.size > 0) {
+      if (audioFile.size > MAX_AUDIO_SIZE) {
+        return jsonResponse({ ok: false, error: "Audio too large" }, 413);
+      }
+      const audioBuffer = Buffer.from(await audioFile.arrayBuffer());
+      audioId = generateId();
+      audioSize = audioBuffer.length;
+      await saveAudio(audioId, audioBuffer);
+    }
+
     const message: LoveboxMessage = {
       id: generateId(),
       deviceId,
@@ -57,6 +82,8 @@ export default async (request: Request): Promise<Response> => {
       caption,
       imageId,
       imageSize: rgb565.length,
+      audioId,
+      audioSize,
       createdAt: new Date().toISOString(),
     };
 
