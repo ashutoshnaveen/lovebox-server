@@ -1110,7 +1110,9 @@ void loop() {
         sendAck();
         if (msg.audioId.length() > 0) {
           if (downloadAudioFile(msg.audioId)) {
-            playAudioFile();
+            if (!playAudioFile()) {
+              showToast("Audio play failed");
+            }
           }
         } else {
           playNotificationTone();
@@ -1258,7 +1260,10 @@ void sendAck() {
 // Network: download and play voice-note audio (16-bit PCM WAV)
 // ---------------------------------------------------------------------------
 bool downloadAudioFile(const String& audioId) {
-  if (!imageStorageReady || WiFi.status() != WL_CONNECTED) return false;
+  if (!imageStorageReady || WiFi.status() != WL_CONNECTED) {
+    Serial.println("audio download skipped: storage/wifi not ready");
+    return false;
+  }
 
   String url = String(API_HOST) + "/.netlify/functions/lovebox-audio?deviceId=" + DEVICE_ID + "&audioId=" + audioId;
   http.useHTTP10(false);
@@ -1268,8 +1273,9 @@ bool downloadAudioFile(const String& audioId) {
 
   int httpCode = http.GET();
   if (httpCode != 200) {
-    Serial.printf("audio HTTP %d\n", httpCode);
+    Serial.printf("audio download failed HTTP %d for %s\n", httpCode, audioId.c_str());
     http.end();
+    showToast("Audio download failed");
     return false;
   }
 
@@ -1278,7 +1284,9 @@ bool downloadAudioFile(const String& audioId) {
   if (FFat.exists(AUDIO_PATH)) FFat.remove(AUDIO_PATH);
   File audioFile = FFat.open(AUDIO_PATH, FILE_WRITE);
   if (!audioFile) {
+    Serial.println("audio file open failed for write");
     http.end();
+    showToast("Audio save failed");
     return false;
   }
 
@@ -1286,16 +1294,24 @@ bool downloadAudioFile(const String& audioId) {
   audioFile.close();
   http.end();
 
-  Serial.printf("audio downloaded: %d bytes\n", written);
-  return written > 44;
+  Serial.printf("audio downloaded: %d bytes for %s\n", written, audioId.c_str());
+  if (written <= 44) {
+    showToast("Audio file too short");
+    return false;
+  }
+  return true;
 }
 
 bool playAudioFile() {
   File f = FFat.open(AUDIO_PATH, FILE_READ);
-  if (!f) return false;
+  if (!f) {
+    Serial.println("audio play failed: cannot open /audio.wav");
+    return false;
+  }
 
   uint8_t hdr[12];
   if (f.read(hdr, 12) != 12 || strncmp((char*)hdr, "RIFF", 4) != 0) {
+    Serial.println("audio play failed: missing RIFF header");
     f.close();
     return false;
   }
@@ -1344,9 +1360,12 @@ bool playAudioFile() {
   }
 
   if (!foundData || dataSize == 0) {
+    Serial.printf("audio play failed: data chunk missing or empty (found=%d size=%u)\n", foundData, dataSize);
     f.close();
     return false;
   }
+
+  Serial.printf("audio playback start: %u Hz, %u ch, %u bit, %u bytes\n", sampleRate, channels, bits, dataSize);
 
   i2s_set_clk(I2S_NUM_0, sampleRate, (i2s_bits_per_sample_t)bits, I2S_CHANNEL_STEREO);
 
