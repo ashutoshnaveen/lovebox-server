@@ -219,6 +219,7 @@ function setAudioPreview(blob) {
 async function normalizeAudioToWav(arrayBuffer) {
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
   const ctx = new AudioCtx();
+  await ctx.resume();
   try {
     const decoded = await decodeAudioBuffer(ctx, arrayBuffer);
     const targetRate = 16000;
@@ -391,13 +392,17 @@ form.addEventListener('submit', async (e) => {
   }
 
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
     const response = await fetch('/.netlify/functions/lovebox-send', {
       method: 'POST',
       headers: {
         'X-Lovebox-Passcode': passcodeInput.value,
       },
       body: formData,
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
 
     const result = await response.json();
 

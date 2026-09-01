@@ -33,10 +33,13 @@ export async function getLatestMessage(deviceId: string): Promise<LoveboxMessage
 export async function saveMessage(message: LoveboxMessage, imageBuffer: Buffer): Promise<void> {
   const messages = messagesStore();
   const images = imagesStore();
-  await Promise.all([
-    messages.setJSON(`latest:${message.deviceId}`, message),
-    images.set(`image:${message.deviceId}:${message.imageId}`, imageBuffer.buffer.slice(imageBuffer.byteOffset, imageBuffer.byteOffset + imageBuffer.byteLength) as ArrayBuffer),
-  ]);
+  await messages.setJSON(`latest:${message.deviceId}`, message);
+  try {
+    await images.set(`image:${message.deviceId}:${message.imageId}`, imageBuffer.buffer.slice(imageBuffer.byteOffset, imageBuffer.byteOffset + imageBuffer.byteLength) as ArrayBuffer);
+  } catch (error) {
+    await messages.delete(`latest:${message.deviceId}`);
+    throw error;
+  }
 }
 
 export async function getImage(deviceId: string, imageId: string): Promise<Buffer | null> {

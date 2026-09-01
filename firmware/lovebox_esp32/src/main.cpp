@@ -493,7 +493,7 @@ void flashRect(const Button& btn) {
 void displayCaption() {
   if (!captionVisible || currentCaption.length() == 0) return;
   const int capY = 42;
-  const int capH = 22;
+  const int capH = 44;
   tft.fillRect(0, capY, SCREEN_WIDTH, capH, ILI9341_BLACK);
   tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
   tft.setTextSize(1);
@@ -558,7 +558,7 @@ void handleTouch() {
       Serial.printf("touch down: raw=%d,%d screen=%d,%d z=%d\n", p.x, p.y, x, y, p.z);
       return;
     }
-    if (abs(x - touchStartX) > 5 || abs(y - touchStartY) > 5) touchMoved = true;
+    if (abs(x - touchStartX) > 10 || abs(y - touchStartY) > 10) touchMoved = true;
 
     // Spike rejection: a single wild sample (shared-SPI glitch or pressure
     // flicker) would draw a long stray line. Skip jumps that are physically
@@ -1075,13 +1075,6 @@ void loop() {
     if (msg.valid && msg.id != lastProcessedId) {
       if (downloadAndDisplayImage(msg.imageId)) {
         animateHeart();
-        if (msg.audioId.length() > 0) {
-          if (downloadAudioFile(msg.audioId)) {
-            playAudioFile();
-          }
-        } else {
-          playNotificationTone();
-        }
         toastUntil = 0;
         lastProcessedId = msg.id;
         currentCaption = msg.caption;
@@ -1091,6 +1084,13 @@ void loop() {
         resetFeedbackState();
         renderScreen();
         sendAck();
+        if (msg.audioId.length() > 0) {
+          if (downloadAudioFile(msg.audioId)) {
+            playAudioFile();
+          }
+        } else {
+          playNotificationTone();
+        }
       } else {
         showScreen("OOPS", "Image failed", lastImageError, ILI9341_RED);
         delay(2000);
@@ -1155,7 +1155,6 @@ LatestMessage fetchLatestMessage() {
   msg.caption = data["caption"].as<String>();
   msg.senderName = data["senderName"].as<String>();
   msg.valid = msg.id.length() > 0 && msg.imageId.length() > 0;
-  currentCaption = msg.caption;
 
   return msg;
 }
