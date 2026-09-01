@@ -547,16 +547,13 @@ void clearToast() {
 void handleTouch() {
   if (!touchReady) return;
 
-  // Poll touched() FIRST: it triggers a fresh XPT2046 read.
-  // Calling getPoint() first returns stale coordinates from the previous touch.
-  bool isTouched = touch.touched();
   TS_Point p = touch.getPoint();
+  bool isTouched = p.z > 0;
 
   if (!wasTouched && isTouched) {
     if (touchUpAt != 0 && millis() - touchUpAt < TOUCH_DEBOUNCE_MS) {
-      return;  // Bounce right after release: ignore
+      return;
     }
-    // Contact just began: record sample count, don't trust coordinates yet.
     touchDownSamples = 0;
     touchMoved = false;
     wasTouched = true;
@@ -566,12 +563,11 @@ void handleTouch() {
   if (wasTouched && isTouched) {
     touchDownSamples++;
     if (touchDownSamples < TOUCH_SETTLE_SAMPLES) {
-      return;  // Discard noisy early samples while pressure stabilizes
+      return;
     }
     int x = mapTouchToScreenX(p.x);
     int y = mapTouchToScreenY(p.y);
     if (touchDownSamples == TOUCH_SETTLE_SAMPLES) {
-      // First stable sample: anchor the gesture here
       touchStartX = x;
       touchStartY = y;
       touchLastX = x;
@@ -581,21 +577,16 @@ void handleTouch() {
     }
     if (abs(x - touchStartX) > 10 || abs(y - touchStartY) > 10) touchMoved = true;
 
-    // Spike rejection: a single wild sample (shared-SPI glitch or pressure
-    // flicker) would draw a long stray line. Skip jumps that are physically
-    // impossible between two consecutive ~3ms samples.
     if (abs(x - touchLastX) > 60 || abs(y - touchLastY) > 60) {
       Serial.printf("touch spike rejected: %d,%d -> %d,%d\n", touchLastX, touchLastY, x, y);
       return;
     }
 
-    // Light smoothing: average with previous point to reduce jitter
     int sx = (x + touchLastX) / 2;
     int sy = (y + touchLastY) / 2;
 
     if (drawModeActive && !isInAnyControl(sx, sy)) {
       drawLine(touchLastX, touchLastY, sx, sy);
-      // First stroke of the session: reveal CLR/SEND buttons now
       if (overlayHasStrokes && !strokeButtonsShown) {
         strokeButtonsShown = true;
         renderUI();
