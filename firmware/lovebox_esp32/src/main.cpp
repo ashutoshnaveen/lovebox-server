@@ -545,24 +545,38 @@ void clearToast() {
 // Touch handling
 // ---------------------------------------------------------------------------
 void handleTouch() {
-  if (!touchReady) return;
+  if (!touchReady) {
+    static unsigned long lastTouchReadyLog = 0;
+    if (millis() - lastTouchReadyLog > 5000) {
+      Serial.println("touch skipped: not ready");
+      lastTouchReadyLog = millis();
+    }
+    return;
+  }
 
+  bool isTouched = touch.touched();
   TS_Point p = touch.getPoint();
-  bool isTouched = p.z > 0;
+
+  if (isTouched) {
+    Serial.printf("touch raw: x=%d y=%d z=%d\n", p.x, p.y, p.z);
+  }
 
   if (!wasTouched && isTouched) {
     if (touchUpAt != 0 && millis() - touchUpAt < TOUCH_DEBOUNCE_MS) {
+      Serial.println("touch debounce: ignore bounce");
       return;
     }
     touchDownSamples = 0;
     touchMoved = false;
     wasTouched = true;
+    Serial.println("touch state: down");
     return;
   }
 
   if (wasTouched && isTouched) {
     touchDownSamples++;
     if (touchDownSamples < TOUCH_SETTLE_SAMPLES) {
+      Serial.printf("touch settling: sample %d/%d\n", touchDownSamples, TOUCH_SETTLE_SAMPLES);
       return;
     }
     int x = mapTouchToScreenX(p.x);
@@ -572,7 +586,7 @@ void handleTouch() {
       touchStartY = y;
       touchLastX = x;
       touchLastY = y;
-      Serial.printf("touch down: raw=%d,%d screen=%d,%d z=%d\n", p.x, p.y, x, y, p.z);
+      Serial.printf("touch anchor: raw=%d,%d screen=%d,%d z=%d\n", p.x, p.y, x, y, p.z);
       return;
     }
     if (abs(x - touchStartX) > 10 || abs(y - touchStartY) > 10) touchMoved = true;
@@ -600,7 +614,7 @@ void handleTouch() {
   if (wasTouched && !isTouched) {
     wasTouched = false;
     touchUpAt = millis();
-    Serial.printf("touch up: screen=%d,%d moved=%s\n", touchStartX, touchStartY, touchMoved ? "yes" : "no");
+    Serial.printf("touch up: screen=%d,%d moved=%s samples=%d\n", touchStartX, touchStartY, touchMoved ? "yes" : "no", touchDownSamples);
     if (!touchMoved && touchDownSamples >= TOUCH_SETTLE_SAMPLES) {
       handleTap(touchStartX, touchStartY);
     }
@@ -634,7 +648,7 @@ void handleTap(int x, int y) {
       const ColorSwatch& s = swatches[i];
       if (x >= s.x && x < s.x + s.w && y >= s.y && y < s.y + s.h) {
         activeColorIndex = i;
-        Serial.printf("tap: color %d\n", i);
+        Serial.printf("tap: color %d rgb565=0x%04X\n", i, swatches[i].color);
         renderUI();
         return;
       }
@@ -738,17 +752,23 @@ bool sendDrawingFeedback() {
   imageFile.close();
 
   uint16_t drawColor = swatches[activeColorIndex].color;
+  int colorCounts[SWATCH_COUNT] = {0};
   for (int y = 0; y < SCREEN_HEIGHT; y++) {
     for (int x = 0; x < SCREEN_WIDTH; x++) {
       uint8_t colorIndex = getOverlayPixel(x, y);
       if (colorIndex != 0) {
         int idx = (y * SCREEN_WIDTH + x) * 2;
         drawColor = swatches[colorIndex - 1].color;
-        composed[idx] = (drawColor >> 8) & 0xFF;
-        composed[idx + 1] = drawColor & 0xFF;
+        composed[idx] = drawColor & 0xFF;
+        composed[idx + 1] = (drawColor >> 8) & 0xFF;
+        if (colorIndex - 1 < SWATCH_COUNT) {
+          colorCounts[colorIndex - 1]++;
+        }
       }
     }
   }
+  Serial.printf("draw feedback colors: white=%d red=%d yellow=%d green=%d blue=%d\n",
+    colorCounts[0], colorCounts[1], colorCounts[2], colorCounts[3], colorCounts[4]);
 
   String url = String(API_HOST) + "/.netlify/functions/lovebox-feedback?deviceId=" + DEVICE_ID;
   http.begin(secureClient, url);
