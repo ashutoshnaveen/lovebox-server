@@ -20,5 +20,5 @@ export function generateId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB upload limit
-export const MAX_AUDIO_SIZE = 5 * 1024 * 1024; // 5 MB upload limit
+export const MAX_IMAGE_SIZE = parseInt(process.env.MAX_IMAGE_SIZE || '10485760', 10); // 10 MB upload limit
+export const MAX_AUDIO_SIZE = parseInt(process.env.MAX_AUDIO_SIZE || '5242880', 10); // 5 MB upload limit

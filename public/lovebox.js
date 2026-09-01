@@ -393,16 +393,27 @@ form.addEventListener('submit', async (e) => {
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000);
-    const response = await fetch('/.netlify/functions/lovebox-send', {
-      method: 'POST',
-      headers: {
-        'X-Lovebox-Passcode': passcodeInput.value,
-      },
-      body: formData,
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
+    const timeoutId = setTimeout(() => controller.abort(), 120000);
+    let response;
+    try {
+      response = await fetch('/.netlify/functions/lovebox-send', {
+        method: 'POST',
+        headers: {
+          'X-Lovebox-Passcode': passcodeInput.value,
+        },
+        body: formData,
+        signal: controller.signal,
+      });
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        showStatus('Upload timed out. Try a smaller file or better connection.', 'error');
+      } else {
+        showStatus('Network error. Please check your connection.', 'error');
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     const result = await response.json();
 
