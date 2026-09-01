@@ -155,6 +155,7 @@ XPT2046_Touchscreen touch(TOUCH_CS, TOUCH_IRQ);
 String lastProcessedId;
 String lastImageError;
 String currentCaption;
+String currentMessageCaption;
 bool imageStorageReady = false;
 bool displayReady = false;
 bool servoReady = false;
@@ -179,16 +180,16 @@ struct Button {
   int x, y, w, h;
 };
 
-const Button heartBtn  = { 250, 0, 70, 40 };
-const Button capBtn    = { 100, 0, 120, 40 };
-const Button penBtn    = { 0, 200, 60, 40 };
-const Button replayBtn = { 245, 200, 75, 40 };
+const Button heartBtn  = { 250, 0, 70, 30 };
+const Button capBtn    = { 10, 0, 80, 30 };
+const Button penBtn    = { 90, 200, 50, 30 };
+const Button replayBtn = { 245, 200, 70, 30 };
 
 const int TOOLBAR_Y = 195;
 const int TOOLBAR_H = 45;
-const Button clearBtn = { 5, 200, 75, 35 };
-const Button sendBtn = { 90, 200, 75, 35 };
-const Button closeBtn = { 245, 200, 70, 35 };
+const Button clearBtn = { 5, 200, 55, 30 };
+const Button sendBtn = { 75, 200, 55, 30 };
+const Button closeBtn = { 245, 200, 60, 30 };
 
 // Color swatches shown above the toolbar when the pen is active
 struct ColorSwatch {
@@ -357,7 +358,7 @@ bool isInButton(int x, int y, const Button& btn) {
 
 bool isInAnyControl(int x, int y) {
   if (isInButton(x, y, heartBtn)) return true;
-  if (currentCaption.length() > 0 && isInButton(x, y, capBtn)) return true;
+  if (currentMessageCaption.length() > 0 && isInButton(x, y, capBtn)) return true;
   if (!toolbarVisible) {
     if (isInButton(x, y, penBtn)) return true;
     if (isInButton(x, y, replayBtn)) return true;
@@ -424,27 +425,27 @@ void resetFeedbackState() {
 // UI rendering
 // ---------------------------------------------------------------------------
 void drawButton(const Button& btn, uint16_t bg, uint16_t fg, const char* label) {
-  tft.fillRoundRect(btn.x, btn.y, btn.w, btn.h, 4, bg);
+  tft.fillRoundRect(btn.x, btn.y, btn.w, btn.h, 3, bg);
   tft.setTextColor(fg, bg);
-  tft.setTextSize(2);  // Bold, clearly readable at 320x240
-  int16_t w = strlen(label) * 12;  // 6px per char * scale 2
-  tft.setCursor(btn.x + (btn.w - w) / 2, btn.y + (btn.h - 14) / 2);
+  tft.setTextSize(1);
+  int16_t w = strlen(label) * 6;
+  tft.setCursor(btn.x + (btn.w - w) / 2, btn.y + 8);
   tft.print(label);
 }
 
 void drawHeartButton(const Button& btn) {
-  tft.fillRoundRect(btn.x, btn.y, btn.w, btn.h, 4, ILI9341_RED);
+  tft.fillRoundRect(btn.x, btn.y, btn.w, btn.h, 3, ILI9341_RED);
   int cx = btn.x + btn.w / 2;
-  int cy = btn.y + btn.h / 2 - 1;
-  tft.fillCircle(cx - 8, cy - 4, 7, ILI9341_WHITE);
-  tft.fillCircle(cx + 8, cy - 4, 7, ILI9341_WHITE);
-  tft.fillTriangle(cx - 15, cy - 2, cx + 15, cy - 2, cx, cy + 14, ILI9341_WHITE);
+  int cy = btn.y + btn.h / 2;
+  tft.fillCircle(cx - 7, cy - 3, 6, ILI9341_WHITE);
+  tft.fillCircle(cx + 7, cy - 3, 6, ILI9341_WHITE);
+  tft.fillTriangle(cx - 13, cy - 1, cx + 13, cy - 1, cx, cy + 12, ILI9341_WHITE);
 }
 
 void renderUI() {
   drawHeartButton(heartBtn);
 
-  if (currentCaption.length() > 0) {
+  if (currentMessageCaption.length() > 0) {
     drawButton(capBtn, captionVisible ? 0x780F : 0x5A69, ILI9341_WHITE, "CAPTION");
   }
 
@@ -492,13 +493,34 @@ void flashRect(const Button& btn) {
 
 void displayCaption() {
   if (!captionVisible || currentCaption.length() == 0) return;
+  const int CHAR_W = 6;
+  const int LINE_H = 8;
+  const int MARGIN_X = 4;
+  const int MARGIN_Y = 3;
+  const int maxW = SCREEN_WIDTH - MARGIN_X * 2;
+  int lines = 1;
+  int w = 0;
+  for (int i = 0; i < currentCaption.length(); i++) {
+    if (currentCaption[i] == '\n') {
+      lines++;
+      w = 0;
+    } else {
+      w += CHAR_W;
+      if (w > maxW) {
+        lines++;
+        w = CHAR_W;
+      }
+    }
+  }
   const int capY = 42;
-  const int capH = 44;
-  tft.fillRect(0, capY, SCREEN_WIDTH, capH, ILI9341_BLACK);
+  const int capH = MARGIN_Y * 2 + lines * LINE_H;
+  for (int row = 0; row < capH; row += 2) {
+    tft.fillRect(0, capY + row, SCREEN_WIDTH, 1, ILI9341_BLACK);
+  }
   tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
   tft.setTextSize(1);
-  tft.setTextWrap(true);
-  tft.setCursor(5, capY + 4);
+  tft.setTextWrap(false);
+  tft.setCursor(MARGIN_X, capY + MARGIN_Y);
   tft.print(currentCaption);
 }
 
@@ -607,7 +629,7 @@ void handleTap(int x, int y) {
     return;
   }
 
-  if (currentCaption.length() > 0 && isInButton(x, y, capBtn)) {
+  if (currentMessageCaption.length() > 0 && isInButton(x, y, capBtn)) {
     Serial.println("tap: caption toggle");
     flashRect(capBtn);
     captionVisible = !captionVisible;
@@ -1017,6 +1039,7 @@ void setup() {
   prefs.begin("lovebox", false);
   lastProcessedId = prefs.getString("lastId", "");
   currentCaption = prefs.getString("lastCaption", "");
+  currentMessageCaption = currentCaption;
 
   showScreen("STORAGE", "Preparing files...", "");
   imageStorageReady = FFat.begin(true);
@@ -1078,6 +1101,7 @@ void loop() {
         toastUntil = 0;
         lastProcessedId = msg.id;
         currentCaption = msg.caption;
+        currentMessageCaption = msg.caption;
         captionVisible = true;
         prefs.putString("lastId", lastProcessedId);
         prefs.putString("lastCaption", currentCaption);
