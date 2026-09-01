@@ -216,6 +216,9 @@ function setAudioPreview(blob) {
 
 // Decode any audio (recorded or uploaded MP3/WAV/AAC/M4A/OGG) and normalize to a loud, clear
 // 16-bit PCM WAV at 16 kHz mono so the ESP32 can stream it straight to the I2S DAC.
+const MAX_AUDIO_BYTES = 10 * 1024 * 1024; // 10 MB source audio limit
+const MAX_AUDIO_SECONDS = 120; // cap converted length to avoid huge WAVs
+
 async function normalizeAudioToWav(arrayBuffer) {
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
   const ctx = new AudioCtx();
@@ -223,16 +226,25 @@ async function normalizeAudioToWav(arrayBuffer) {
   try {
     const decoded = await decodeAudioBuffer(ctx, arrayBuffer);
     const targetRate = 16000;
-    const offline = new OfflineAudioContext(1, Math.ceil(decoded.duration * targetRate), targetRate);
-    const src = offline.createBufferSource();
-    src.buffer = decoded;
-    src.connect(offline.destination);
-    src.start();
-    const rendered = await offline.startRendering();
-    return encodeWav(rendered.getChannelData(0), targetRate);
+    const maxSamples = MAX_AUDIO_SECONDS * targetRate;
+    const samples = decoded.numberOfChannels === 1
+      ? decoded.getChannelData(0)
+      : decodeMono(decoded);
+    const useCount = Math.min(samples.length, maxSamples);
+    const trimmed = samples.subarray ? samples.subarray(0, useCount) : samples.slice(0, useCount);
+    return encodeWav(trimmed, targetRate);
   } finally {
     ctx.close();
   }
+}
+
+function decodeMono(decoded) {
+  const left = decoded.getChannelData(0);
+  if (decoded.numberOfChannels === 1) return left;
+  const right = decoded.numberOfChannels > 1 ? decoded.getChannelData(1) : left;
+  const out = new Float32Array(left.length);
+  for (let i = 0; i < left.length; i++) out[i] = (left[i] + right[i]) / 2;
+  return out;
 }
 
 function decodeAudioBuffer(ctx, arrayBuffer) {
@@ -294,6 +306,11 @@ function encodeWav(samples, sampleRate) {
 audioInput.addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) {
+    setAudioPreview(null);
+    return;
+  }
+  if (file.size > MAX_AUDIO_BYTES) {
+    showAudioStatus('Audio file is too large. Use a file under 10 MB.', true);
     setAudioPreview(null);
     return;
   }
@@ -388,6 +405,12 @@ form.addEventListener('submit', async (e) => {
   formData.append('caption', captionInput.value);
   formData.append('image', selectedFile);
   if (audioWavBlob) {
+    if (audioWavBlob.size > MAX_AUDIO_BYTES) {
+      showStatus('Audio is too large after conversion. Use a shorter clip.', 'error');
+      setSending(false);
+      updateSendButton();
+      return;
+    }
     formData.append('audio', audioWavBlob, 'voice-note.wav');
   }
 
@@ -408,6 +431,7 @@ form.addEventListener('submit', async (e) => {
       if (err.name === 'AbortError') {
         showStatus('Upload timed out. Try a smaller file or better connection.', 'error');
       } else {
+        console.error('Upload failed', err);
         showStatus('Network error. Please check your connection.', 'error');
       }
       throw err;
@@ -415,7 +439,14 @@ form.addEventListener('submit', async (e) => {
       clearTimeout(timeoutId);
     }
 
-    const result = await response.json();
+    let result;
+    try {
+      result = await response.json();
+    } catch (err) {
+      console.error('Invalid server response', err);
+      showStatus('Server returned an invalid response. Please try again.', 'error');
+      return;
+    }
 
     if (response.ok && result.ok) {
       showStatus('Sent! Your Lovebox will display it soon.', 'success');
