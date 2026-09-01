@@ -218,6 +218,7 @@ function setAudioPreview(blob) {
 // 16-bit PCM WAV at 16 kHz mono so the ESP32 can stream it straight to the I2S DAC.
 const MAX_AUDIO_BYTES = 10 * 1024 * 1024; // 10 MB source audio limit
 const MAX_AUDIO_SECONDS = 120; // cap converted length to avoid huge WAVs
+const TARGET_SAMPLE_RATE = 16000;
 
 async function normalizeAudioToWav(arrayBuffer) {
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -225,14 +226,13 @@ async function normalizeAudioToWav(arrayBuffer) {
   await ctx.resume();
   try {
     const decoded = await decodeAudioBuffer(ctx, arrayBuffer);
-    const targetRate = 16000;
-    const maxSamples = MAX_AUDIO_SECONDS * targetRate;
-    const samples = decoded.numberOfChannels === 1
+    const maxSamples = MAX_AUDIO_SECONDS * TARGET_SAMPLE_RATE;
+    let samples = decoded.numberOfChannels === 1
       ? decoded.getChannelData(0)
       : decodeMono(decoded);
-    const useCount = Math.min(samples.length, maxSamples);
-    const trimmed = samples.subarray ? samples.subarray(0, useCount) : samples.slice(0, useCount);
-    return encodeWav(trimmed, targetRate);
+    const trimmed = samples.subarray ? samples.subarray(0, Math.min(samples.length, maxSamples)) : samples.slice(0, Math.min(samples.length, maxSamples));
+    const resampled = await resampleTo(trimmed, decoded.sampleRate, TARGET_SAMPLE_RATE);
+    return encodeWav(resampled, TARGET_SAMPLE_RATE);
   } finally {
     ctx.close();
   }
@@ -244,6 +244,22 @@ function decodeMono(decoded) {
   const right = decoded.numberOfChannels > 1 ? decoded.getChannelData(1) : left;
   const out = new Float32Array(left.length);
   for (let i = 0; i < left.length; i++) out[i] = (left[i] + right[i]) / 2;
+  return out;
+}
+
+async function resampleTo(samples, fromRate, toRate) {
+  if (fromRate === toRate) return samples;
+  const ratio = fromRate / toRate;
+  const newLength = Math.round(samples.length / ratio);
+  const out = new Float32Array(newLength);
+  for (let i = 0; i < newLength; i++) {
+    const pos = i * ratio;
+    const idx = Math.floor(pos);
+    const frac = pos - idx;
+    const a = samples[Math.min(idx, samples.length - 1)];
+    const b = samples[Math.min(idx + 1, samples.length - 1)];
+    out[i] = a + (b - a) * frac;
+  }
   return out;
 }
 
