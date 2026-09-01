@@ -747,12 +747,13 @@ bool sendDrawingFeedback() {
   }
   imageFile.close();
 
+  uint16_t drawColor = swatches[activeColorIndex].color;
   for (int y = 0; y < SCREEN_HEIGHT; y++) {
     for (int x = 0; x < SCREEN_WIDTH; x++) {
       if (getOverlayPixel(x, y)) {
         int idx = (y * SCREEN_WIDTH + x) * 2;
-        composed[idx] = 0xFF;
-        composed[idx + 1] = 0xFF;
+        composed[idx] = (drawColor >> 8) & 0xFF;
+        composed[idx + 1] = drawColor & 0xFF;
       }
     }
   }
