@@ -180,16 +180,16 @@ struct Button {
   int x, y, w, h;
 };
 
-const Button heartBtn  = { 250, 0, 70, 30 };
-const Button capBtn    = { 10, 0, 80, 30 };
-const Button penBtn    = { 90, 200, 50, 30 };
-const Button replayBtn = { 245, 200, 70, 30 };
+const Button heartBtn  = { 250, 200, 70, 30 };
+const Button capBtn    = { 0, 0, 90, 30 };
+const Button penBtn    = { 0, 200, 45, 30 };
+const Button replayBtn = { 250, 0, 55, 30 };
 
 const int TOOLBAR_Y = 195;
 const int TOOLBAR_H = 45;
-const Button clearBtn = { 5, 200, 55, 30 };
-const Button sendBtn = { 75, 200, 55, 30 };
-const Button closeBtn = { 245, 200, 60, 30 };
+const Button clearBtn = { 0, 200, 45, 30 };
+const Button sendBtn = { 55, 200, 55, 30 };
+const Button closeBtn = { 250, 200, 65, 30 };
 
 // Color swatches shown above the toolbar when the pen is active
 struct ColorSwatch {
@@ -427,8 +427,8 @@ void resetFeedbackState() {
 void drawButton(const Button& btn, uint16_t bg, uint16_t fg, const char* label) {
   tft.fillRoundRect(btn.x, btn.y, btn.w, btn.h, 3, bg);
   tft.setTextColor(fg, bg);
-  tft.setTextSize(1);
-  int16_t w = strlen(label) * 6;
+  tft.setTextSize(2);
+  int16_t w = strlen(label) * 12;
   tft.setCursor(btn.x + (btn.w - w) / 2, btn.y + 8);
   tft.print(label);
 }
@@ -443,7 +443,9 @@ void drawHeartButton(const Button& btn) {
 }
 
 void renderUI() {
-  drawHeartButton(heartBtn);
+  if (!toolbarVisible) {
+    drawHeartButton(heartBtn);
+  }
 
   if (currentMessageCaption.length() > 0) {
     drawButton(capBtn, captionVisible ? 0x780F : 0x5A69, ILI9341_WHITE, "CAPTION");
@@ -618,7 +620,7 @@ void handleTouch() {
 }
 
 void handleTap(int x, int y) {
-  if (isInButton(x, y, heartBtn)) {
+  if (!toolbarVisible && isInButton(x, y, heartBtn)) {
     Serial.println("tap: heart");
     flashRect(heartBtn);
     if (sendLikeFeedback()) {
