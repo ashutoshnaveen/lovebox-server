@@ -207,8 +207,9 @@ const ColorSwatch swatches[SWATCH_COUNT] = {
 };
 int activeColorIndex = 0;
 
-// 1-bit overlay: 320 * 240 / 8 = 9600 bytes
-uint8_t overlayBuffer[(SCREEN_WIDTH * SCREEN_HEIGHT) / 8];
+// Color-index overlay: 320 * 240 = 76800 bytes
+// 0 = empty, 1..SWATCH_COUNT = color index + 1
+uint8_t overlayBuffer[SCREEN_WIDTH * SCREEN_HEIGHT];
 
 bool captionVisible = true;
 bool toolbarVisible = false;
@@ -377,19 +378,17 @@ bool isInAnyControl(int x, int y) {
   return false;
 }
 
-bool getOverlayPixel(int x, int y) {
-  if (x < 0 || x >= SCREEN_WIDTH || y < 0 || y >= SCREEN_HEIGHT) return false;
+uint8_t getOverlayPixel(int x, int y) {
+  if (x < 0 || x >= SCREEN_WIDTH || y < 0 || y >= SCREEN_HEIGHT) return 0;
   int idx = y * SCREEN_WIDTH + x;
-  return overlayBuffer[idx >> 3] & (1 << (idx & 7));
+  return overlayBuffer[idx];
 }
 
 void setOverlayPixel(int x, int y) {
   if (x < 0 || x >= SCREEN_WIDTH || y < 0 || y >= SCREEN_HEIGHT) return;
   int idx = y * SCREEN_WIDTH + x;
-  int byteIdx = idx >> 3;
-  uint8_t bit = 1 << (idx & 7);
-  if (overlayBuffer[byteIdx] & bit) return;
-  overlayBuffer[byteIdx] |= bit;
+  if (overlayBuffer[idx] != 0) return;
+  overlayBuffer[idx] = activeColorIndex + 1;
   overlayHasStrokes = true;
   tft.drawPixel(x, y, swatches[activeColorIndex].color);
 }
@@ -750,8 +749,10 @@ bool sendDrawingFeedback() {
   uint16_t drawColor = swatches[activeColorIndex].color;
   for (int y = 0; y < SCREEN_HEIGHT; y++) {
     for (int x = 0; x < SCREEN_WIDTH; x++) {
-      if (getOverlayPixel(x, y)) {
+      uint8_t colorIndex = getOverlayPixel(x, y);
+      if (colorIndex != 0) {
         int idx = (y * SCREEN_WIDTH + x) * 2;
+        drawColor = swatches[colorIndex - 1].color;
         composed[idx] = (drawColor >> 8) & 0xFF;
         composed[idx + 1] = drawColor & 0xFF;
       }
