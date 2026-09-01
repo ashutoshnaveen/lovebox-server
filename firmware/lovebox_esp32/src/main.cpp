@@ -956,6 +956,7 @@ void setup() {
   // Order matters: configure custom pins first, then touch.begin() attaches
   // its interrupt; the library's internal SPI.begin() keeps existing pin mux.
   SPI.begin(TOUCH_SCK, TOUCH_MISO, TOUCH_MOSI, TOUCH_CS);
+  pinMode(TOUCH_IRQ, INPUT_PULLUP);
   touchReady = touch.begin();
   Serial.printf("Touch ready: %s\n", touchReady ? "yes" : "no");
 
