@@ -180,7 +180,7 @@ struct Button {
 };
 
 const Button heartBtn  = { 250, 0, 70, 40 };
-const Button capBtn    = { 0, 0, 65, 36 };
+const Button capBtn    = { 100, 0, 120, 40 };
 const Button penBtn    = { 0, 200, 60, 40 };
 const Button replayBtn = { 245, 200, 75, 40 };
 
@@ -445,7 +445,7 @@ void renderUI() {
   drawHeartButton(heartBtn);
 
   if (currentCaption.length() > 0) {
-    drawButton(capBtn, captionVisible ? 0x2104 : 0x5A69, ILI9341_WHITE, "CAP");
+    drawButton(capBtn, captionVisible ? 0x780F : 0x5A69, ILI9341_WHITE, "CAPTION");
   }
 
   if (!toolbarVisible) {
