@@ -189,7 +189,7 @@ const int TOOLBAR_Y = 195;
 const int TOOLBAR_H = 45;
 const Button clearBtn = { 0, 200, 45, 30 };
 const Button sendBtn = { 55, 200, 55, 30 };
-const Button closeBtn = { 265, 200, 55, 30 };
+const Button closeBtn = { 260, 200, 60, 30 };
 
 // Color swatches shown above the toolbar when the pen is active
 struct ColorSwatch {
