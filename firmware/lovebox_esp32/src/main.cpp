@@ -89,6 +89,10 @@ const int SERVO_STEP_DELAY_MS = 20;
 #define I2S_DIN_PIN   6   // DIN / SD
 // GAIN and SD pins left unconnected (default gain, always enabled)
 
+// Audio playback gain. 1.0 = no boost, 1.6 = moderate boost.
+// Lower this if audio distorts at peak volumes.
+const float AUDIO_DIGITAL_GAIN = 1.0f;
+
 const int SCREEN_WIDTH = 320;
 const int SCREEN_HEIGHT = 240;
 const int IMAGE_SIZE = SCREEN_WIDTH * SCREEN_HEIGHT * 2; // RGB565, 2 bytes per pixel
@@ -1389,7 +1393,8 @@ bool playAudioFile() {
   uint32_t remaining = dataSize;
   bool mono = (channels == 1);
   size_t bytesWritten = 0;
-  const float DIGITAL_GAIN = 1.6f;
+  const float DIGITAL_GAIN = AUDIO_DIGITAL_GAIN;
+  int32_t peakSample = 0;
 
   while (remaining > 0) {
     uint32_t toRead = remaining > CHUNK ? CHUNK : remaining;
@@ -1403,6 +1408,8 @@ bool playAudioFile() {
         int32_t amplified = (int32_t)(raw * DIGITAL_GAIN);
         if (amplified > 32767) amplified = 32767;
         if (amplified < -32768) amplified = -32768;
+        int32_t absSample = amplified < 0 ? -amplified : amplified;
+        if (absSample > peakSample) peakSample = absSample;
         uint16_t s = (uint16_t)(int16_t)amplified;
         stereoBuf[i * 4]     = s & 0xFF;
         stereoBuf[i * 4 + 1] = (s >> 8) & 0xFF;
@@ -1418,6 +1425,8 @@ bool playAudioFile() {
           int32_t amplified = (int32_t)(raw * DIGITAL_GAIN);
           if (amplified > 32767) amplified = 32767;
           if (amplified < -32768) amplified = -32768;
+          int32_t absSample = amplified < 0 ? -amplified : amplified;
+          if (absSample > peakSample) peakSample = absSample;
           uint16_t s = (uint16_t)(int16_t)amplified;
           buf[i * 2]     = s & 0xFF;
           buf[i * 2 + 1] = (s >> 8) & 0xFF;
@@ -1429,7 +1438,9 @@ bool playAudioFile() {
     yield();
   }
 
+  Serial.printf("audio playback peak level: %d / 32767 (%.1f%%)\n", peakSample, (peakSample * 100.0f) / 32767.0f);
   f.close();
+  i2s_zero_dma_buffer(I2S_NUM_0);
   Serial.println("audio playback finished");
   return true;
 }
