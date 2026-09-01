@@ -180,16 +180,16 @@ struct Button {
   int x, y, w, h;
 };
 
-const Button heartBtn  = { 250, 200, 70, 30 };
-const Button capBtn    = { 0, 0, 90, 30 };
-const Button penBtn    = { 0, 200, 45, 30 };
-const Button replayBtn = { 250, 0, 55, 30 };
+const Button heartBtn  = { 278, 210, 42, 30 };
+const Button capBtn    = { 0, 0, 88, 30 };
+const Button penBtn    = { 0, 210, 45, 30 };
+const Button replayBtn = { 265, 0, 55, 30 };
 
 const int TOOLBAR_Y = 195;
 const int TOOLBAR_H = 45;
 const Button clearBtn = { 0, 200, 45, 30 };
 const Button sendBtn = { 55, 200, 55, 30 };
-const Button closeBtn = { 250, 200, 65, 30 };
+const Button closeBtn = { 265, 200, 55, 30 };
 
 // Color swatches shown above the toolbar when the pen is active
 struct ColorSwatch {
@@ -516,9 +516,7 @@ void displayCaption() {
   }
   const int capY = 42;
   const int capH = MARGIN_Y * 2 + lines * LINE_H;
-  for (int row = 0; row < capH; row += 2) {
-    tft.fillRect(0, capY + row, SCREEN_WIDTH, 1, ILI9341_BLACK);
-  }
+  tft.fillRect(0, capY, SCREEN_WIDTH, capH, ILI9341_BLACK);
   tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
   tft.setTextSize(1);
   tft.setTextWrap(false);
