@@ -53,6 +53,7 @@ const char* FIRMWARE_VERSION = "1.0.3";
 #define TFT_MOSI  11
 #define TFT_SCK   12
 #define TFT_MISO  13
+// Note: TFT_BL is already defined by the ESP32-S3 Box board variant (GPIO 45)
 
 // ---------------- Touch pins (shared SPI bus, separate CS) ----------------
 #define TOUCH_CS   16
@@ -965,6 +966,14 @@ void setup() {
   displayReady = true;
   tft.setRotation(1);
   Serial.println("TFT initialized");
+  Serial.printf("Backlight pin TFT_BL=%d\n", TFT_BL);
+  if (TFT_BL >= 0 && TFT_BL < 48) {
+    pinMode(TFT_BL, OUTPUT);
+    digitalWrite(TFT_BL, HIGH);
+    Serial.printf("Backlight forced ON on GPIO %d\n", TFT_BL);
+  } else {
+    Serial.println("Backlight control skipped: invalid TFT_BL");
+  }
   tft.fillScreen(ILI9341_BLACK);
 
   // Touch setup (shared SPI bus with TFT, separate CS).
