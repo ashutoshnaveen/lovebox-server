@@ -238,13 +238,20 @@ unsigned long lastPollAt = 0;
 String toastText;
 unsigned long toastUntil = 0;
 
+// Servo animation state (non-blocking)
+bool servoAnimating = false;
+unsigned long servoNextAt = 0;
+int servoCurrentAngle = SERVO_BASE_ANGLE;
+int servoDirection = 1;
+
 // Forward declarations
 void displayCaption();
 LatestMessage fetchLatestMessage();
-bool downloadAndDisplayImage(const String& imageId);
+bool downloadAndDisplayImage(const String& imageId, bool displayNow = true);
 void sendAck();
-void animateHeart();
-void moveServo(int fromAngle, int toAngle);
+void startServoAnimation();
+void updateServo();
+void stopServoAnimation();
 bool downloadAudioFile(const String& audioId);
 bool playAudioFile();
 bool playNotificationTone();
@@ -1109,6 +1116,7 @@ void setup() {
 void loop() {
   handleTouch();
   clearToast();
+  updateServo();
 
   if (WiFi.status() != WL_CONNECTED) {
     showScreen("NO WI-FI", "Wi-Fi lost", "Reconnecting...", ILI9341_RED);
@@ -1123,8 +1131,21 @@ void loop() {
     LatestMessage msg = fetchLatestMessage();
 
     if (msg.valid && msg.id != lastProcessedId) {
-      if (downloadAndDisplayImage(msg.imageId)) {
-        animateHeart();
+      if (downloadAndDisplayImage(msg.imageId, false)) {
+        bool audioReady = false;
+        if (msg.audioId.length() > 0) {
+          audioReady = downloadAudioFile(msg.audioId);
+        }
+
+        showScreen("LOVE", "Displaying...", "", ILI9341_PINK);
+        if (!displayStoredImage()) {
+          lastImageError = "Cannot read image";
+          showScreen("OOPS", "Image failed", lastImageError, ILI9341_RED);
+          delay(2000);
+          renderScreen();
+          return;
+        }
+
         toastUntil = 0;
         lastProcessedId = msg.id;
         currentCaption = msg.caption;
@@ -1135,15 +1156,16 @@ void loop() {
         resetFeedbackState();
         renderScreen();
         sendAck();
-        if (msg.audioId.length() > 0) {
-          if (downloadAudioFile(msg.audioId)) {
-            if (!playAudioFile()) {
-              showToast("Audio play failed");
-            }
-          }
+
+        startServoAnimation();
+
+        if (msg.audioId.length() > 0 && audioReady) {
+          playAudioFile();
         } else {
           playNotificationTone();
         }
+
+        stopServoAnimation();
       } else {
         showScreen("OOPS", "Image failed", lastImageError, ILI9341_RED);
         delay(2000);
@@ -1215,11 +1237,11 @@ LatestMessage fetchLatestMessage() {
 // ---------------------------------------------------------------------------
 // Network: download and display image
 // ---------------------------------------------------------------------------
-bool downloadAndDisplayImage(const String& imageId) {
+bool downloadAndDisplayImage(const String& imageId, bool displayNow) {
   lastImageError = "";
   String url = String(API_HOST) + "/.netlify/functions/lovebox-image?deviceId=" + DEVICE_ID + "&imageId=" + imageId;
 
-  if (!imageStorageReady) {
+  if (!imageStorageReady || WiFi.status() != WL_CONNECTED) {
     lastImageError = "Image storage unavailable";
     return false;
   }
@@ -1262,10 +1284,12 @@ bool downloadAndDisplayImage(const String& imageId) {
     return false;
   }
 
-  showScreen("LOVE", "Displaying...", "", ILI9341_PINK);
-  if (!displayStoredImage()) {
-    lastImageError = "Cannot read image";
-    return false;
+  if (displayNow) {
+    showScreen("LOVE", "Displaying...", "", ILI9341_PINK);
+    if (!displayStoredImage()) {
+      lastImageError = "Cannot read image";
+      return false;
+    }
   }
 
   return true;
@@ -1444,6 +1468,7 @@ bool playAudioFile() {
       i2s_write(I2S_NUM_0, buf, (size_t)rd, &bytesWritten, portMAX_DELAY);
     }
     remaining -= rd;
+    updateServo();
     yield();
   }
 
@@ -1487,6 +1512,7 @@ bool playNotificationTone() {
       stereoBuf[i * 4 + 3] = (s >> 8) & 0xFF;
     }
     i2s_write(I2S_NUM_0, stereoBuf, (size_t)count * 4, &bytesWritten, portMAX_DELAY);
+    updateServo();
     yield();
   }
   Serial.println("notification tone finished");
@@ -1496,14 +1522,53 @@ bool playNotificationTone() {
 // ---------------------------------------------------------------------------
 // Servo animation
 // ---------------------------------------------------------------------------
+void startServoAnimation() {
+  if (!servoReady) return;
+  servoCurrentAngle = SERVO_BASE_ANGLE;
+  servoDirection = 1;
+  servoAnimating = true;
+  servoNextAt = 0;
+}
+
+void updateServo() {
+  if (!servoReady || !servoAnimating) return;
+
+  unsigned long now = millis();
+  if (now < servoNextAt) return;
+  servoNextAt = now + SERVO_STEP_DELAY_MS;
+
+  servoCurrentAngle += servoDirection;
+  if (servoCurrentAngle >= SERVO_RIGHT_ANGLE) {
+    servoCurrentAngle = SERVO_RIGHT_ANGLE;
+    servoDirection = -1;
+  } else if (servoCurrentAngle <= SERVO_LEFT_ANGLE) {
+    servoCurrentAngle = SERVO_LEFT_ANGLE;
+    servoDirection = 1;
+  }
+  heartServo.write(servoCurrentAngle);
+}
+
+void stopServoAnimation() {
+  servoAnimating = false;
+  if (servoReady) {
+    heartServo.write(SERVO_BASE_ANGLE);
+    servoCurrentAngle = SERVO_BASE_ANGLE;
+  }
+}
+
 void animateHeart() {
-  moveServo(SERVO_BASE_ANGLE, SERVO_RIGHT_ANGLE);
-  moveServo(SERVO_RIGHT_ANGLE, SERVO_BASE_ANGLE);
-  moveServo(SERVO_BASE_ANGLE, SERVO_LEFT_ANGLE);
-  moveServo(SERVO_LEFT_ANGLE, SERVO_BASE_ANGLE);
+  if (!servoReady) return;
+  startServoAnimation();
+  unsigned long start = millis();
+  while (servoAnimating && millis() - start < 2200) {
+    updateServo();
+    delay(SERVO_STEP_DELAY_MS);
+  }
+  stopServoAnimation();
 }
 
 void moveServo(int fromAngle, int toAngle) {
+  if (!servoReady) return;
   int step = (toAngle > fromAngle) ? 1 : -1;
   for (int pos = fromAngle; pos != toAngle; pos += step) {
     heartServo.write(pos);
