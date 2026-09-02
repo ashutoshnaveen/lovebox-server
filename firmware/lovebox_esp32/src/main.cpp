@@ -243,6 +243,8 @@ bool servoAnimating = false;
 unsigned long servoNextAt = 0;
 int servoCurrentAngle = SERVO_BASE_ANGLE;
 int servoDirection = 1;
+unsigned long servoStartedAt = 0;
+const unsigned long SERVO_MIN_DURATION_MS = 5000;
 
 // Forward declarations
 void displayCaption();
@@ -1131,6 +1133,7 @@ void loop() {
     LatestMessage msg = fetchLatestMessage();
 
     if (msg.valid && msg.id != lastProcessedId) {
+      Serial.printf("message: new id=%s audioId=%s\n", msg.id.c_str(), msg.audioId.c_str());
       if (downloadAndDisplayImage(msg.imageId, false)) {
         bool audioReady = false;
         if (msg.audioId.length() > 0) {
@@ -1542,6 +1545,7 @@ void startServoAnimation() {
   servoDirection = 1;
   servoAnimating = true;
   servoNextAt = 0;
+  servoStartedAt = millis();
 }
 
 void updateServo() {
@@ -1563,6 +1567,11 @@ void updateServo() {
 }
 
 void stopServoAnimation() {
+  if (!servoAnimating) return;
+  unsigned long elapsed = millis() - servoStartedAt;
+  if (elapsed < SERVO_MIN_DURATION_MS) {
+    delay(SERVO_MIN_DURATION_MS - elapsed);
+  }
   servoAnimating = false;
   if (servoReady) {
     heartServo.write(SERVO_BASE_ANGLE);
