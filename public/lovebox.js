@@ -433,6 +433,7 @@ form.addEventListener('submit', async (e) => {
   formData.append('senderName', document.getElementById('senderName').value);
   formData.append('caption', captionInput.value);
   formData.append('image', selectedFile);
+  console.log('send: image selected', selectedFile ? selectedFile.name : 'none');
   if (audioWavBlob) {
     if (audioWavBlob.size > MAX_AUDIO_BYTES) {
       showStatus('Audio is too large after conversion. Use a shorter clip.', 'error');
@@ -441,6 +442,9 @@ form.addEventListener('submit', async (e) => {
       return;
     }
     formData.append('audio', audioWavBlob, 'voice-note.wav');
+    console.log('send: audio attached', audioWavBlob.size, 'bytes');
+  } else {
+    console.log('send: no audio attached');
   }
 
   try {
