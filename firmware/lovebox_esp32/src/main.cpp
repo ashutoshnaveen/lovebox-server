@@ -1159,9 +1159,25 @@ void loop() {
 
         startServoAnimation();
 
-        if (msg.audioId.length() > 0 && audioReady) {
-          playAudioFile();
+        if (msg.audioId.length() > 0) {
+          Serial.printf("playback: msg.audioId=%s audioReady=%s\n", msg.audioId.c_str(), audioReady ? "yes" : "no");
+          if (audioReady) {
+            bool exists = FFat.exists(AUDIO_PATH);
+            int audioSize = 0;
+            if (exists) {
+              File f = FFat.open(AUDIO_PATH, FILE_READ);
+              if (f) audioSize = f.size();
+              f.close();
+            }
+            Serial.printf("playback: audio file exists=%s size=%d\n", exists ? "yes" : "no", audioSize);
+            bool playOk = playAudioFile();
+            Serial.printf("playback: audio file result=%s\n", playOk ? "ok" : "failed");
+          } else {
+            Serial.println("playback: audio not ready, playing notification tone");
+            playNotificationTone();
+          }
         } else {
+          Serial.println("playback: no audioId, playing notification tone");
           playNotificationTone();
         }
 
@@ -1436,12 +1452,12 @@ bool playAudioFile() {
       int samples = rd / 2;
       for (int i = 0; i < samples; i++) {
         int16_t raw = (int16_t)(buf[i * 2] | (buf[i * 2 + 1] << 8));
-        int32_t amplified = (int32_t)(raw * DIGITAL_GAIN);
-        if (amplified > 32767) amplified = 32767;
-        if (amplified < -32768) amplified = -32768;
+        float sample = (float)raw * DIGITAL_GAIN;
+        float soft = tanhf(sample / 32767.0f) * 32767.0f;
+        int16_t amplified = (int16_t)soft;
         int32_t absSample = amplified < 0 ? -amplified : amplified;
         if (absSample > peakSample) peakSample = absSample;
-        uint16_t s = (uint16_t)(int16_t)amplified;
+        uint16_t s = (uint16_t)amplified;
         stereoBuf[i * 4]     = s & 0xFF;
         stereoBuf[i * 4 + 1] = (s >> 8) & 0xFF;
         stereoBuf[i * 4 + 2] = s & 0xFF;
@@ -1453,12 +1469,12 @@ bool playAudioFile() {
         int samples = rd / 2;
         for (int i = 0; i < samples; i++) {
           int16_t raw = (int16_t)(buf[i * 2] | (buf[i * 2 + 1] << 8));
-          int32_t amplified = (int32_t)(raw * DIGITAL_GAIN);
-          if (amplified > 32767) amplified = 32767;
-          if (amplified < -32768) amplified = -32768;
+          float sample = (float)raw * DIGITAL_GAIN;
+          float soft = tanhf(sample / 32767.0f) * 32767.0f;
+          int16_t amplified = (int16_t)soft;
           int32_t absSample = amplified < 0 ? -amplified : amplified;
           if (absSample > peakSample) peakSample = absSample;
-          uint16_t s = (uint16_t)(int16_t)amplified;
+          uint16_t s = (uint16_t)amplified;
           buf[i * 2]     = s & 0xFF;
           buf[i * 2 + 1] = (s >> 8) & 0xFF;
         }
