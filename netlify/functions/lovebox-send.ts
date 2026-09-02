@@ -65,11 +65,13 @@ export default async (request: Request): Promise<Response> => {
     let audioId: string | undefined;
     let audioSize: number | undefined;
     const audioFile = formData.get("audio");
+    console.log("send: audio field present:", !!audioFile, "size:", audioFile && typeof audioFile === "object" && "size" in audioFile ? (audioFile as { size: number }).size : "n/a");
     if (isUploadFile(audioFile) && audioFile.size > 0) {
       if (audioFile.size > MAX_AUDIO_SIZE) {
         return jsonResponse({ ok: false, error: "Audio too large" }, 413);
       }
       const audioBuffer = Buffer.from(await audioFile.arrayBuffer());
+      console.log("send: audio buffer bytes:", audioBuffer.length, "header:", audioBuffer.slice(0, 12).toString("hex"));
       if (
         audioBuffer.length < 12 ||
         audioBuffer.readUInt32LE(0) !== 0x46464952 ||
@@ -80,6 +82,9 @@ export default async (request: Request): Promise<Response> => {
       audioId = generateId();
       audioSize = audioBuffer.length;
       await saveAudio(audioId, audioBuffer);
+      console.log("send: audio saved id:", audioId, "size:", audioSize);
+    } else {
+      console.log("send: no audio attached");
     }
 
     const message: LoveboxMessage = {
