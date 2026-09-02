@@ -216,8 +216,9 @@ function setAudioPreview(blob) {
 
 // Decode any audio (recorded or uploaded MP3/WAV/AAC/M4A/OGG) and normalize to a loud, clear
 // 16-bit PCM WAV at 16 kHz mono so the ESP32 can stream it straight to the I2S DAC.
+// Adjust these limits if you want longer audio or larger source files.
 const MAX_AUDIO_BYTES = 10 * 1024 * 1024; // 10 MB source audio limit
-const MAX_AUDIO_SECONDS = 120; // cap converted length to avoid huge WAVs
+const MAX_AUDIO_SECONDS = 120; // cap converted length to avoid huge WAV uploads
 const TARGET_SAMPLE_RATE = 16000;
 
 async function normalizeAudioToWav(arrayBuffer) {
@@ -326,7 +327,8 @@ audioInput.addEventListener('change', async (e) => {
     return;
   }
   if (file.size > MAX_AUDIO_BYTES) {
-    showAudioStatus('Audio file is too large. Use a file under 10 MB.', true);
+    const maxMB = Math.round(MAX_AUDIO_BYTES / (1024 * 1024));
+    showAudioStatus(`Audio file is too large. Use a file under ${maxMB} MB.`, true);
     setAudioPreview(null);
     return;
   }

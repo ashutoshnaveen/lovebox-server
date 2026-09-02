@@ -1330,8 +1330,6 @@ bool downloadAudioFile(const String& audioId) {
     return false;
   }
 
-  showToast("Voice note...");
-
   if (FFat.exists(AUDIO_PATH)) FFat.remove(AUDIO_PATH);
   File audioFile = FFat.open(AUDIO_PATH, FILE_WRITE);
   if (!audioFile) {
