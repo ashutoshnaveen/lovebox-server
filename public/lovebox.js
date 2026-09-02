@@ -23,13 +23,12 @@ const deviceHealth = document.getElementById('deviceHealth');
 const healthStatus = document.getElementById('healthStatus');
 const healthGrid = document.getElementById('healthGrid');
 const refreshHealthBtn = document.getElementById('refreshHealth');
-
 let selectedFile = null;
 let feedbackSignature = null;
 let audioWavBlob = null;
+let audioProcessing = false;
 let mediaRecorder = null;
 let mediaChunks = [];
-
 passcodeInput.value = localStorage.getItem('lovebox_passcode') || '';
 document.getElementById('senderName').value = localStorage.getItem('lovebox_sender') || '';
 
@@ -324,14 +323,18 @@ audioInput.addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) {
     setAudioPreview(null);
+    updateSendButton();
     return;
   }
   if (file.size > MAX_AUDIO_BYTES) {
     const maxMB = Math.round(MAX_AUDIO_BYTES / (1024 * 1024));
     showAudioStatus(`Audio file is too large. Use a file under ${maxMB} MB.`, true);
     setAudioPreview(null);
+    updateSendButton();
     return;
   }
+  audioProcessing = true;
+  updateSendButton();
   showAudioStatus('Processing audio...', false);
   try {
     const buf = await file.arrayBuffer();
@@ -342,6 +345,9 @@ audioInput.addEventListener('change', async (e) => {
     console.error('Audio processing failed', err);
     setAudioPreview(null);
     showAudioStatus('Could not read that audio file.', true);
+  } finally {
+    audioProcessing = false;
+    updateSendButton();
   }
 });
 
@@ -363,6 +369,8 @@ recordBtn.addEventListener('click', async () => {
       stream.getTracks().forEach((t) => t.stop());
       recordBtn.classList.remove('recording');
       recordBtn.textContent = 'Record';
+      audioProcessing = true;
+      updateSendButton();
       showAudioStatus('Processing recording...', false);
       try {
         const blob = new Blob(mediaChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
@@ -373,6 +381,9 @@ recordBtn.addEventListener('click', async () => {
         console.error('Recording processing failed', err);
         setAudioPreview(null);
         showAudioStatus('Could not process recording.', true);
+      } finally {
+        audioProcessing = false;
+        updateSendButton();
       }
     };
     mediaRecorder.start();
@@ -492,7 +503,7 @@ form.addEventListener('submit', async (e) => {
 });
 
 function updateSendButton() {
-  sendBtn.disabled = !selectedFile || !passcodeInput.value;
+  sendBtn.disabled = !selectedFile || !passcodeInput.value || audioProcessing;
 }
 
 function setSending(sending) {
